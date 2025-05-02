@@ -1,0 +1,268 @@
+---
+title: "mapping_stats"
+author: "R.Spielhofer"
+date: "2025-04-11"
+output: html_document
+---
+```{r}
+library(sf)
+library(leaflet)
+library(DT)
+library(dplyr)
+library(ggplot2)
+library(dplyr)
+library(terra)
+```
+
+
+# Participatory mapping of ecosystem services in Trnava region
+## Background
+The PAREUS project aims to optimize a coherent network of protected areas and other area effective conservation measures (OECM). While in classical protected areas biodiversity conservation is the only target, OECMs account for other landscape values and aim to reach biodiversity protection in accordance with economic and social activities. Thus, the project engages local stakeholders to map landscape values / ecosystem services for the study region of Trnava (Slovakia).
+
+## General participatory mapping procedure
+With an online based, interactive mapping tool participants were asked to indicate areas they know or think are good to benefit from different ecosystem services Table 1 shows the mapped ecosystem services including the explicit question in English and Slovak for the mapping exercise. 
+
+```{r setup, echo=FALSE}
+
+main_path<-"P:/312204_pareus/WP2/PGIS_ES_mapping/raw_data_backup/"
+
+es<-read.csv(paste0(main_path,"es_descr.csv"))%>%select(esCICES_title, esQUEST_en,esDESC_lay_en, esQUEST_svk)
+names(es)<-c("Ecosystem Service","Question to map","Description", "Original question Slovakian")
+datatable(es, caption = " Table 1: Ecosystem services for participatory mapping",
+  elementId = "Table_1")
+```
+
+The basic steps of the procedure for each participant were the following:
+* General, socio-demographic questions
+* Instructions and familiarize with mapping tool
+* Mapping and evaluating areas of high ecosystem service benefit for each ecosystem service
+* System computes an individual ecosystem service map for each participant
+* For each ecosystem service the system calculates coefficient of variation maps among participants.
+* In a second mapping round, participants can adjust their initially mapped areas based on the other participants answer.
+
+Thus, the whole procedure reflects a spatial Delphi mapping, incorporating knowledge from a group of people and seeking consensus. Consensus in this procedure represents consensus about the landscape configuration to benefit from a specific ecosystem service and not necessarily regarding specific places.
+
+```{r cars}
+mapper<-read.csv(paste0(main_path,"user_conf.csv"))
+print(length(unique(mapper$userMAIL)))
+
+socio_dem<-read.csv(paste0(main_path,"mapper.csv"))
+
+
+```
+
+## Participants
+In the Trnava region N = 9 participants were participating the physical workshop. 60% were male and 40% female participants, 80% currently living in the study area
+
+## Study area
+
+The study area for the mapping exercise was Trnava region in west Slovakia. The area is 4'133 km2 and is congruent with the NUTS3 administrative region of SK021.
+
+```{r}
+
+stud_area<-read_sf(paste0(main_path,"study_site.gpkg"))%>%filter(cntrID == "SVK")
+print(stud_area$siteAREAkm2)
+
+leaflet(stud_area)%>%
+              addProviderTiles(providers$Esri.WorldImagery,options = tileOptions(minZoom = 8, maxZoom = 18),group = "World image")%>%
+  addPolygons(color="black",  fillColor = "orange", weight = 0, smoothFactor = 0.5,
+                          opacity = 1.0,fillOpacity = 0.5, label = ~ siteNAME,
+                          highlightOptions = highlightOptions(weight = 1, color = "white", bringToFront = TRUE))
+
+```
+
+## Areas of high ecosystem service benefits
+
+Each participant were asked to indicate good areas to benefit from five randomly assigned ecosystem services. To do so, participants draw either simple rectangles or more complex polygons on an interactive map. The background map could be changed between a RGB satellite image and an open street topographic map.
+
+```{r}
+es_geom1<-read_sf(paste0(main_path,"ind_polys_R1.gpkg"))
+print(sum(st_area(es_geom1)/1000000))
+
+```
+
+For the 10 ecosystem services N = 119 geometries were drawn to indicate good spots to benefit from the ecosystem services. The total area of drawn polygons was 97.5km2.
+
+```{r}
+
+# 2. Get unique esID values
+esIDs <- unique(es_geom1$esID)
+
+# 3. Create Leaflet map
+m <- leaflet(stud_area) %>%
+  addPolygons(color="black",  fillColor = "orange", weight = 1, smoothFactor = 0.5,
+                          opacity = 1.0,fillOpacity = 0)%>%
+  addProviderTiles(providers$CartoDB.Positron)
+
+# 4. Add a layer for each esID
+for (id in esIDs) {
+  sub_sf <- es_geom1 %>% filter(esID == id)
+  
+  m <- m %>%
+    addPolygons(
+      data = sub_sf,
+      color = "blue",
+      fillColor = "lightblue",
+      fillOpacity = 0.5,
+      weight = 1,
+      label = ~paste("esID:", esID),
+      group = as.character(id)
+    )
+}
+
+# 5. Add layer control to toggle visibility
+m <- m %>%
+  
+  addLayersControl(
+    overlayGroups = as.character(esIDs),
+    options = layersControlOptions(collapsed = FALSE)
+  )
+
+# 6. Show the map
+m
+
+```
+
+# Ecosystem service maps
+Based on the polygons provided by the participants, ecosystem service maps were calculated using a three step approach.
+1) Sample spatially explicit explanatory variables of elevation, ecosystem condition, accessibility and land cover - land use within the designated areas.
+2) use these points as training points to explain high ecosystem service benefits with a random forest approach
+3) Extrapolate the probability values to benefit from ecosystem services to the whole study area using the explanatory variables.
+
+```{r}
+# 1. List your raster files (adjust the path and pattern as needed)
+raster_files <- list.files(paste0(main_path,"SK021/4_mean_R1"), full.names = TRUE)
+
+# 2. Read all rasters
+rasters <- lapply(raster_files, rast)
+
+# 3. Assign names based on file names (for map layer labels)
+layer_names <- tools::file_path_sans_ext(basename(raster_files))
+
+# 4. Create Leaflet map with each raster as a toggleable layer
+leaflet() %>%
+  addProviderTiles(providers$CartoDB.Positron) -> m
+
+  pal <- colorNumeric("viridis", c(0,1), na.color = "transparent")
+
+# 5. Add each raster as an image layer with a group
+for (i in seq_along(rasters)) {
+
+  
+  m <- m %>%
+    addRasterImage(rasters[[i]], colors = pal, opacity = 0.6, group = layer_names[i])
+}
+
+# 6. Add layer control
+m <- m %>%
+  addLayersControl(
+    overlayGroups = layer_names,
+    options = layersControlOptions(collapsed = FALSE)
+  )%>%hideGroup(layer_names)%>%
+  addLegend(pal = pal, values = c(0,1), title = "Ecosystem service benefits")
+
+m
+#
+
+```
+
+## Consensus round 1
+In addition to the mean ecosystem service values, the coefficient of variation (CV) provides a measure of consensus or disagreement between participants. Calculating the CV maps and display only areas where CV<1, shows areas of high consensus between participants.
+
+```{r}
+raster_files <- list.files("C:/Users/reto.spielhofer/OneDrive - NINA/Documents/Projects/PAREUS/es_analysis_local_backup/raw_data_backup/SK021/4_CV_R1", full.names = TRUE)
+
+# 2. Read all rasters
+#rasters <- lapply(raster_files, rast)
+
+rasters <- lapply(raster_files, function(f) {
+  r <- rast(f)
+  r[r > .9] <- NA
+  r
+})
+
+# 3. Assign names based on file names (for map layer labels)
+layer_names <- tools::file_path_sans_ext(basename(raster_files))
+
+# 4. Create Leaflet map with each raster as a toggleable layer
+leaflet() %>%
+  addProviderTiles(providers$CartoDB.Positron) -> m
+
+  pal <- colorNumeric("viridis", c(0,.9), na.color = "transparent")
+
+# 5. Add each raster as an image layer with a group
+for (i in seq_along(rasters)) {
+
+  
+  m <- m %>%
+    addRasterImage(rasters[[i]], colors = pal, opacity = 0.6, group = layer_names[i])
+}
+
+# 6. Add layer control
+m <- m %>%
+  addLayersControl(
+    overlayGroups = layer_names,
+    options = layersControlOptions(collapsed = FALSE)
+  )%>%hideGroup(layer_names)%>%
+  addLegend(pal = pal, values = c(0,.9), title = "Consensus areas of ecosystem service benefits")
+
+m
+```
+
+## ES mean R2
+After a first mapping round, participants were asked to map good areas to benefit from ecosystem services again. This time, the consensus maps (CV<1) and the explanations of other participants were additional information.
+
+Thus, the mean ecosystem service maps include individual maps that either has been adjusted based on the new information or not. 
+
+## ES importance
+As a final question, each participant was asked to rate the importance of the 10 ecosystem services. This has been done using a parwise comparison approach and grouped AHP analysis.
+
+```{r}
+
+```
+
+
+
+
+## Spatial differences between round 1 and 2 
+
+
+
+```{r}
+raster_files1 <- list.files("C:/Users/reto.spielhofer/OneDrive - NINA/Documents/Projects/PAREUS/es_analysis_local_backup/raw_data_backup/SK021/4_mean_R1", full.names = TRUE)
+
+raster_files2 <- list.files("C:/Users/reto.spielhofer/OneDrive - NINA/Documents/Projects/PAREUS/es_analysis_local_backup/raw_data_backup/SK021/6_mean_R2", full.names = TRUE)
+
+
+# Sort to align by name
+f1_files <- sort(raster_files1)
+f2_files <- sort(raster_files2)
+
+# Sanity check: file names should match (ignoring paths)
+stopifnot(identical(basename(f1_files), basename(f2_files)))
+
+# Compute differences
+raster_diffs <- mapply(function(r1, r2) {
+  r1_rast <- rast(r1)
+  r2_rast <- rast(r2)
+  r1_rast - r2_rast
+}, f1_files, f2_files, SIMPLIFY = FALSE)
+
+# Name the output list
+names(raster_diffs) <- tools::file_path_sans_ext(basename(f1_files))
+
+i=6
+# Pick a raster from the list
+r <- raster_diffs[[i]]
+
+# Mask out zeros (set them to NA)
+r[r == 0] <- NA
+
+# Plot
+plot(r, main = paste0(names(raster_diffs)[i], " (Non-zero diff only)"))
+
+
+```
+
+
+

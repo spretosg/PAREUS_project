@@ -4,37 +4,26 @@ library(sf)
 library(dplyr)
 library(ppcor)
 
-# cntr<-"NO"
-##1. Ecosystem service benefits (Bi)
-### these are the maps resulting from es_accounting and/or geoprospective approach
-# dat_path<-"C:/Users/reto.spielhofer/git/PAREUS_routines/2_optimal_siting_pa"
-# es_files<-list.files(paste0(dat_path,"/2_protected_features"),full.names = T)
-# 
-# es_raster <- rast(es_files[1:3])
+
+main_dir<-"P:/312204_pareus/WP2/PGIS_ES_mapping/raw_data_backup/SK021"
+## Read mean es raster from R2 of workshop
+erosion = rast(list.files(paste0(main_dir,"/3_ind_R1/erosion"), full.names = TRUE))
+mat  = rast(list.files(paste0(main_dir,"/3_ind_R1/mat"), full.names = TRUE))
+farm  = rast(list.files(paste0(main_dir,"/3_ind_R1/farm"), full.names = TRUE))
+flood  = rast(list.files(paste0(main_dir,"/3_ind_R1/flood"), full.names = TRUE))
+wild_plant  = rast(list.files(paste0(main_dir,"/3_ind_R1/wild_plant"), full.names = TRUE))
+wild_hunt  = rast(list.files(paste0(main_dir,"/3_ind_R1/wild_hunt"), full.names = TRUE))
+sense  = rast(list.files(paste0(main_dir,"/3_ind_R1/sense"), full.names = TRUE))
 
 
-
-### test pcor
-# create sample data frame
-
-### Synergy between ES
-
-## here we read the individual es rasters for e.g. N=20 participants
-es1  = rast(array(runif(10*10*20),c(10,10,20)))
-es2  = rast(array(runif(10*10*20),c(10,10,20)))
-es3  = rast(array(runif(10*10*20),c(10,10,20)))
-es4  = rast(array(runif(10*10*20),c(10,10,20)))
-es5  = rast(array(runif(10*10*20),c(10,10,20)))
-
-
-es<-c("es1","es2","es3","es4","es5")
+es<-c("erosion","mat","farm","flood","wild_plant","wild_hunt","sense")
 # from AHP in tool
-w<-c(0.2,0.4,0.1,0.2,0.1)
+w<-c(0.2,0.4,0.1,0.3)
 es<-data.frame(es,w)
 colnames(es)<-c("es","weight")
 
 ## define the pcor function using three rasters of spec dimensions --> here 20 individual ES1 rasters
-n_part<-nlyr(es1)
+# n_part<-nlyr(aest)
 # fun_pcor =  function(x) {
 #   # n_part=20
 #   Rs = pcor.test(x[1:n_part],x[(n_part+1):(2*n_part)],x[(2*n_part+1):(3*n_part)])
@@ -49,7 +38,7 @@ n_es<-as.numeric(nrow(es))
 fun_pcor_alt =  function(x) {
   # n_part=20
   #first two are the main, the others for the correction, take the total number of es to select the correct array values
-  Rs = pcor.test(x[1:n_part],x[(n_part+1):(2*n_part)],x[(2*n_part+1):(n_es*n_part)],method = "spearman")
+  Rs = pcor.test(x[[1:4]],x[(n_part+1):(2*n_part)],x[(2*n_part+1):(n_es*n_part)],method = "spearman")
   Rx = Rs$estimate
   # Px = Rs$p.value
   # return(c(Rx, Px))
@@ -67,50 +56,30 @@ c_stack <- rast() # stack to store the costs of esi
 ## for the length in comb we need to choose the two es and the other es to pcor with
 for(i in 1: nrow(comb)){
   a<-comb[i,]
+  print(i/nrow(comb))
   left<-as.character(a$Var1)
   right<-as.character(a$Var2)
   # select the others
-  ctrl<-es%>%filter(es != left & es != right)%>%dplyr::select(es)
-  # empty stack for the r raster of the es i left
-  # r_stack <- rast()
-  # 
-  # for(j in 1:nrow(no_comb)){
-  #   z = c(get(left),get(right),get(as.character(no_comb[j,])))
-  #   
-  #   # z = c(es1,es2,es3)
-  #   pcor_temp<-app(z, fun_pcor)
-  #   # write in stack
-  #   # p_stack<-raster::stack(p_stack,pcor_temp$Px)
-  #   r_stack<-c(r_stack,pcor_temp)
-  # }
+  nlayers <- min(nlyr(get(left)), nlyr(get(right)))
+  rank1 <- app(get(left), rank)
+  rank2 <- app(get(right), rank)
+  right <- rank1[[1:nlayers]]
+  left <- rank2[[1:nlayers]]
   
-  ## alternative make a vector containing all the raster in the correct order for the pcor_alt function:
-  
-  base<-c(get(left),get(right))
-  control_rast<-c()
-  for(n in 1: nrow(ctrl)){
-    control_rast<-c(control_rast,get(as.character(ctrl[n,])))
-  }
-  control_rast<-rast(control_rast)
-  z<-c(base,control_rast)
-  
-  # z = c(get(left),get(right),get(as.character(no_comb[1,])),get(as.character(no_comb[2,])))
-  sji<-app(z, fun_pcor_alt)
-  
-  #the mean of all r rasters represents the synergy-trade off between Esi and ESj given all other ES
-  # sji<-mean(r_stack,na.rm=T)
-  # rm(r_stack)
-  
+  sji <- app(c(rank1, rank2), fun = function(x) {
+    n <- length(x) / 2
+    cor(x[1:n], x[(n+1):(2*n)], method = "pearson")
+  })
   ## exclusiveness of an es is then the 1-Sji raster (values close to 1 == exclusive) however pos or neg correlation does not matter
   eji<-1-abs(sji)
   ## multiply exclusiveness raster with benefit (mean of all participants) raster i
-  bi<-mean(get(left))
-  bj<-mean(get(right))
-  wj<-as.numeric(es%>%filter(es==right)%>%dplyr::select(weight))
+  bi<-mean(left)
+  bj<-mean(right)
+  wj<-as.numeric(es%>%filter(es==as.character(a$Var2))%>%dplyr::select(weight))
   c_rast<-eji*bi*bj*wj
-  names(c_rast)<-paste0(left,"_",right)
+  names(c_rast)<-paste0(as.character(a$Var1),"_",as.character(a$Var2))
   
-  names(sji)<-paste0(left,"_",right)
+  names(sji)<-paste0(as.character(a$Var1),"_",as.character(a$Var2))
   ## assign es comb to both
   s_stack<-c(s_stack,sji)
   c_stack<-c(c_stack,c_rast)
@@ -130,9 +99,17 @@ for(n in 1: nrow(es)){
 c=sum(cost)
 plot(c)
 
+#write raster
+terra::writeRaster(c,paste0(main_dir,"/cost_raster_es.tif"))
 
 
 
 
+################
 
 
+
+# Ensure equal number of layers: match by time, interpolate, or truncate
+
+
+plot(eji, main = "Spearman Rank Correlation (per pixel)")
