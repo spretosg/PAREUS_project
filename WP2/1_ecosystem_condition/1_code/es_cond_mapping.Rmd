@@ -1,0 +1,24 @@
+---
+title: "es_cond_mapping"
+output: html_document
+---
+
+```{r}
+library(sf)
+library(leaflet)
+library(DT)
+library(dplyr)
+library(ggplot2)
+library(dplyr)
+library(terra)
+
+main_path<-here::here("WP2/1_ecosystem_condition")
+es_cond<-paste0(main_path,"/","0_input/es_cond_svk.tif")
+```
+
+```{r}
+es_cond<-terra::rast(es_cond)
+
+plot(es_cond)
+```
+
