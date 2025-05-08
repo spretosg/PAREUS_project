@@ -6,6 +6,7 @@ library(ppcor)
 
 
 main_dir<-"P:/312204_pareus/WP2/PGIS_ES_mapping/raw_data_backup/SK021"
+out_dir<-"P:/312204_pareus/WP4/cost_raster_es"
 ## Read mean es raster from R2 of workshop
 erosion = rast(list.files(paste0(main_dir,"/3_ind_R1/erosion"), full.names = TRUE))
 mat  = rast(list.files(paste0(main_dir,"/3_ind_R1/mat"), full.names = TRUE))
@@ -15,10 +16,12 @@ wild_plant  = rast(list.files(paste0(main_dir,"/3_ind_R1/wild_plant"), full.name
 wild_hunt  = rast(list.files(paste0(main_dir,"/3_ind_R1/wild_hunt"), full.names = TRUE))
 sense  = rast(list.files(paste0(main_dir,"/3_ind_R1/sense"), full.names = TRUE))
 
+mean_es<-c(mean(erosion),mean(mat),mean(farm),mean(flood),mean(wild_plant),mean(wild_hunt),mean(sense))
+names(mean_es)<-c("erosion","mat","farm","flood","wild_plant","wild_hunt","sense")
 
 es<-c("erosion","mat","farm","flood","wild_plant","wild_hunt","sense")
 # from AHP in tool
-w<-c(0.2,0.4,0.1,0.3)
+w<-c(0.2,0.1,0.1,0.2,0.1,0.15,0.15)
 es<-data.frame(es,w)
 colnames(es)<-c("es","weight")
 
@@ -35,15 +38,15 @@ colnames(es)<-c("es","weight")
 
 n_es<-as.numeric(nrow(es))
 
-fun_pcor_alt =  function(x) {
-  # n_part=20
-  #first two are the main, the others for the correction, take the total number of es to select the correct array values
-  Rs = pcor.test(x[[1:4]],x[(n_part+1):(2*n_part)],x[(2*n_part+1):(n_es*n_part)],method = "spearman")
-  Rx = Rs$estimate
-  # Px = Rs$p.value
-  # return(c(Rx, Px))
-  return(Rx)
-}
+# fun_pcor_alt =  function(x) {
+#   # n_part=20
+#   #first two are the main, the others for the correction, take the total number of es to select the correct array values
+#   Rs = pcor.test(x[[1:4]],x[(n_part+1):(2*n_part)],x[(2*n_part+1):(n_es*n_part)],method = "spearman")
+#   Rx = Rs$estimate
+#   # Px = Rs$p.value
+#   # return(c(Rx, Px))
+#   return(Rx)
+# }
 
 ## generate all combinations but not ES1 == ES1...
 
@@ -60,21 +63,28 @@ for(i in 1: nrow(comb)){
   left<-as.character(a$Var1)
   right<-as.character(a$Var2)
   # select the others
-  nlayers <- min(nlyr(get(left)), nlyr(get(right)))
-  rank1 <- app(get(left), rank)
-  rank2 <- app(get(right), rank)
-  right <- rank1[[1:nlayers]]
-  left <- rank2[[1:nlayers]]
+  #nlayers <- min(nlyr(get(left)), nlyr(get(right)))
+  # rank1 <- app(get(left), rank)
+  # rank2 <- app(get(right), rank)
+  # right <- rank1[[1:nlayers]]
+  # left <- rank2[[1:nlayers]]
+  # 
+  # sji <- app(c(right, left), fun = function(x) {
+  #   n <- length(x) / 2
+  #   #print(n)
+  #   cor(x[1:n], x[(n+1):(2*n)], method = "pearson")
+  # })
+  l_raster <- mean_es[[left]]
+  r_raster <- mean_es[[right]]
+  tmp_cor_rast<-c(l_raster,r_raster)
+  ## local, focal correlation with 5x5 window
+  sji<-focalPairs(tmp_cor_rast,matrix(1,5,5),"pearson")
   
-  sji <- app(c(rank1, rank2), fun = function(x) {
-    n <- length(x) / 2
-    cor(x[1:n], x[(n+1):(2*n)], method = "pearson")
-  })
   ## exclusiveness of an es is then the 1-Sji raster (values close to 1 == exclusive) however pos or neg correlation does not matter
   eji<-1-abs(sji)
   ## multiply exclusiveness raster with benefit (mean of all participants) raster i
-  bi<-mean(left)
-  bj<-mean(right)
+  bi<-mean(values(l_raster),na.rm=T)
+  bj<-mean(values(r_raster),na.rm=T)
   wj<-as.numeric(es%>%filter(es==as.character(a$Var2))%>%dplyr::select(weight))
   c_rast<-eji*bi*bj*wj
   names(c_rast)<-paste0(as.character(a$Var1),"_",as.character(a$Var2))
@@ -100,7 +110,7 @@ c=sum(cost)
 plot(c)
 
 #write raster
-terra::writeRaster(c,paste0(main_dir,"/cost_raster_es.tif"))
+terra::writeRaster(c,paste0(out_dir,"/cost_raster_es.tif"),overwrite=T)
 
 
 
@@ -113,3 +123,7 @@ terra::writeRaster(c,paste0(main_dir,"/cost_raster_es.tif"))
 
 
 plot(eji, main = "Spearman Rank Correlation (per pixel)")
+
+# plot cost raster
+cost_raster<-terra::rast(paste0(main_dir,"/cost_raster_es.tif"))
+plot(cost)

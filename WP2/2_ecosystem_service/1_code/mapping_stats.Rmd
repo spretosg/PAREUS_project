@@ -129,6 +129,8 @@ Based on the polygons provided by the participants, ecosystem service maps were 
 2) use these points as training points to explain high ecosystem service benefits with a random forest approach
 3) Extrapolate the probability values to benefit from ecosystem services to the whole study area using the explanatory variables.
 
+### Leaflet map
+
 ```{r}
 # 1. List your raster files (adjust the path and pattern as needed)
 raster_files <- list.files(paste0(main_path,"SK021/4_mean_R1"), full.names = TRUE)
@@ -165,6 +167,39 @@ m
 #
 
 ```
+### ggplot maps
+```{r}
+# 1. List your raster files (adjust the path and pattern as needed)
+raster_files <- list.files(paste0(main_path,"SK021/6_mean_R2"), full.names = TRUE)
+
+# 2. Read all rasters
+rasters <- lapply(raster_files, rast)
+
+# 3. Assign names based on file names (for map layer labels)
+layer_names <- tools::file_path_sans_ext(basename(raster_files))
+
+# Step 3: Convert each raster to a data frame and add layer name
+raster_dfs <- lapply(seq_along(rasters), function(i) {
+  df <- as.data.frame(rasters[[i]], xy = TRUE)
+  names(df)[3] <- "ES_capacity"  # Ensure the value column is named consistently
+  df$layer_name <- layer_names[i]
+  df
+})
+
+# Step 4: Combine all into one data frame
+raster_all <- bind_rows(raster_dfs)
+
+# Step 5: Plot using ggplot2
+ggplot(raster_all, aes(x = x, y = y, fill = ES_capacity)) +
+  geom_raster() +
+  scale_fill_viridis_c() +
+  coord_equal() +
+  facet_wrap(~ layer_name) +
+  theme_minimal() +
+  labs(fill = "ES capacity", title = "")
+```
+
+
 
 ## Consensus round 1
 In addition to the mean ecosystem service values, the coefficient of variation (CV) provides a measure of consensus or disagreement between participants. Calculating the CV maps and display only areas where CV<1, shows areas of high consensus between participants.
