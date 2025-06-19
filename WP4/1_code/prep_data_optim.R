@@ -25,19 +25,22 @@ mean_es<-mean(es_raster)
 es_cond<-paste0(main_dir,"WP2/es_condition/",siteID,"_es_cond.tif")
 es_cond<-terra::rast(es_cond)
 
-##habitat
+##habitat (from lulc)
 habitat<-paste0(main_dir,"WP4/habitat/",siteID,"_habitat.tif")
 habitat<-terra::rast(habitat)
+
+
 
 
 ## transform and resample
 cost <- project(cost, es_cond)
 mean_es <- project(mean_es, es_cond)
-habitat <-project(habitat, es_cond)
+#habitat <-project(habitat, es_cond)
 
-cost <- resample(cost, es_cond, method = "bilinear") 
-mean_es <- resample(mean_es, es_cond, method = "bilinear") 
-habitat <- resample(habitat, es_cond, method = "min") 
+
+cost <- resample(cost, es_cond, method = "bilinear")
+mean_es <- resample(mean_es, es_cond, method = "bilinear")
+#habitat <- resample(habitat, es_cond, method = "min") 
 ### combine feat 1 / 2 into i
 feat <- c(es_cond, mean_es, habitat)
 names(feat) <- c("es_conditon", "mean_es", "habitat")
@@ -68,12 +71,12 @@ target_crs <- st_crs(svk)$wkt  # Use WKT for terra
 cost <- project(cost, target_crs)
 mean_es <- project(mean_es, target_crs)
 es_cond <- project(es_cond, target_crs)
-habitat <- project(habitat, target_crs)
+#habitat <- project(habitat, target_crs)
 
 # Resample all to match the first projected raster
-mean_es <- terra::resample(mean_es, cost)
-es_cond <- terra::resample(es_cond,cost)
-habitat3 <-terra::resample(habitat,cost, method = "min")
+# mean_es <- terra::resample(mean_es, cost)
+# es_cond <- terra::resample(es_cond,cost)
+# habitat3 <-terra::resample(habitat,cost, method = "min")
 
 min_max_normalize <- function(r) {
   # Normalize each layer individually
@@ -104,10 +107,10 @@ grid_vect <- vect(grid_clipped)
 sampled_es <- terra::extract(mean_es, grid_vect, fun = mean, na.rm = TRUE)
 sampled_cost <- terra::extract(cost, grid_vect, fun = mean, na.rm = TRUE)
 sampled_condition <- terra::extract(es_cond, grid_vect, fun = mean, na.rm = TRUE)
-sampled_habitat <- terra::extract(habitat3, grid_vect, fun = max, na.rm = TRUE)
+sampled_habitat <- terra::extract(habitat, grid_vect, fun = min, na.rm = TRUE)
 sampled_habitat$habitat<-as.integer(sampled_habitat$habitat)
 
 # 6. Combine sampled data back with grid for NSGA py optimization
 grid_data <- cbind(grid_clipped, sampled_es[, -1], sampled_cost[, -1],sampled_condition[, -1],sampled_habitat[, -1])  # remove ID column
 colnames(grid_data)<-c("es_service","cost","es_condition","habitat","geometry")
-st_write(grid_data, "SVK_test4.json", driver = "GeoJSON")
+st_write(grid_data, "SVK_test5.json", driver = "GeoJSON", overwrite = T)
