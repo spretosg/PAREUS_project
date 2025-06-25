@@ -19,6 +19,7 @@ target_crs <- st_crs(stud_area)$wkt
 
 PA<-st_read(paste0(main_dir,"WP4/pa_existing/PA_",sid,"/PA_WGS84.shp"))
 PA<-st_transform(PA,target_crs)
+#PA<-PA[1:3,]
 
 
 cent_PA<-sf::st_centroid(PA)
@@ -29,7 +30,7 @@ PA<-st_union(PA)
 PA <- st_sf(geometry = PA)
 
 # create a grid for defining the planning units PU for optimization
-grid <- st_make_grid(stud_area, cellsize = 0.01, square = TRUE)
+grid <- st_make_grid(stud_area, cellsize = 0.1, square = TRUE)
 grid <- st_sf(geometry = grid)
 # Clip the grid to polygon boundary
 grid_clipped <- st_intersection(grid, stud_area)%>%dplyr::select()
@@ -170,7 +171,7 @@ grid_data$habitat_border_count <- diff_neighbors
 # 
 # grid_data$pa_border <- diff_neighbors_pa
 
-st_write(grid_data, "SK021_all8.json", driver = "GeoJSON", overwrite = T)
+st_write(grid_data, "SK021_all_low2.json", driver = "GeoJSON", overwrite = T)
 
 ##############################
 ######### subset to agri #####
