@@ -19,50 +19,52 @@ target_crs <- st_crs(stud_area)$wkt
 
 PA<-st_read(paste0(main_dir,"WP4/pa_existing/PA_",sid,"/PA_WGS84.shp"))
 PA<-st_transform(PA,target_crs)
-#PA<-PA[1:3,]
 
+#the hard Ia or II protected areas according to IUCN (unified)
+PA_hard<-PA%>%filter(IUCN_CAT %in% c("Ia","II"))%>%st_union()%>%st_sf()
 
+#centroids of all PAs
 cent_PA<-sf::st_centroid(PA)
 
-
-
-PA<-st_union(PA)
-PA <- st_sf(geometry = PA)
+PA_union<-st_union(PA)
+PA_union <- st_sf(geometry = PA_union)
 
 # create a grid for defining the planning units PU for optimization
-grid <- st_make_grid(stud_area, cellsize = 0.1, square = TRUE)
+grid <- st_make_grid(stud_area, cellsize = 0.02, square = TRUE)
 grid <- st_sf(geometry = grid)
-# Clip the grid to polygon boundary
+
+# Clip the grid to study area
 grid_clipped <- st_intersection(grid, stud_area)%>%dplyr::select()
 grid_clipped<-st_make_valid(grid_clipped)
 
 #### sample if cell is in PA (TRUE) or not (FALSE)
-pa_intersects_cell<-st_intersects(grid_clipped,PA, sparse = FALSE)
+pa_intersects_cell<-st_intersects(grid_clipped,PA_union, sparse = FALSE)
 pa_intersects_cell<-pa_intersects_cell[,1]
 
+#### sample if cell is in hard_PA (TRUE) or not (FALSE)
+pa_intersects_cell_hard<-st_intersects(grid_clipped,PA_hard, sparse = FALSE)
+pa_intersects_cell_hard<-pa_intersects_cell_hard[,1]
+
+## sample all IUCN categories if itersection
+grid_clipped <- st_join(grid_clipped, PA[, c("IUCN_CAT")], left = TRUE)
+
+
 #### and PA centroids for faster path calculation
-# pa_intersects_cent<-st_within(grid_clipped,cent_PA, sparse = FALSE)
-# pa_intersects_cent<-pa_intersects_cent[,1]
+pa_intersects_cent<-st_within(grid_clipped,cent_PA, sparse = FALSE)
+pa_intersects_cent<-pa_intersects_cent[,1]
 
-# Spatial join to find which grid cells contain any points
-
+# For each cell calc closest dist do PA hard
+grid_clipped$dist_pa_hard<-st_distance(grid_clipped,PA_hard)
+# and distance to all kinds of PA
+grid_clipped$dist_pa<-st_distance(grid_clipped,PA_union)
 
 
 #Convert grid to SpatVector for terra compatibility
 grid_vect <- vect(grid_clipped)
 
 #### POPULATION grid from projects/sat-io/open-datasets/GHS/GHS_POP/GHS_POP_E2025 for least cost path lock out (not establish OECM in built-up areas) # number of people per cell (0.01km2)
-lock_out_pop<-terra::rast(paste0(main_dir,"WP4/lock_out/pop_",sid,".tif"))
-lock_out_pop <- project(lock_out_pop, target_crs)
-## and a reclassified raster for the barriers in the least cost path
-n_target = 6 #4 people per 0.01km2
-m <- c(0, n_target, FALSE,
-       n_target, max(values(lock_out_pop,na.rm=T)), TRUE,NaN,NaN,FALSE)
-rclmat <- matrix(m, ncol=3, byrow=TRUE)
-lock_out<- terra::classify(lock_out_pop,rclmat,include.lowest = T)
-plot(lock_out)
-
-
+pop<-terra::rast(paste0(main_dir,"WP4/lock_out/pop_",sid,".tif"))
+pop <- project(pop, target_crs)
 
 ######################
 #### OPTIM VARS #######
@@ -108,15 +110,12 @@ mean_es<-min_max_normalize(mean_es)
 cost_syn<-min_max_normalize(cost_syn)
 es_cond<-min_max_normalize(es_cond)
 
-####################################
-########## AGRI (LULC 200-299) #####
-####################################
-
-cost_es<-terra::rast(es_raster_files[basename(es_raster_files) %in% "farm_mean.tif"])
-cost_es <- project(cost_es, es_cond)
-cost_es <- resample(cost_es, es_cond, method = "bilinear")
-cost_es<-min_max_normalize(cost_es)
-sampled_cost_es <- terra::extract(cost_es, grid_vect, fun = mean, na.rm = TRUE)
+# cost regarding agricultural es benefits
+cost_agri<-terra::rast(es_raster_files[basename(es_raster_files) %in% "farm_mean.tif"])
+cost_agri <- project(cost_agri, es_cond)
+cost_agri <- resample(cost_agri, es_cond, method = "bilinear")
+cost_agri<-min_max_normalize(cost_agri)
+sampled_cost_agri <- terra::extract(cost_agri, grid_vect, fun = mean, na.rm = TRUE)
 
 ###############################################
 ############ SAMPLE GRID and OPTIM VARS #######
@@ -131,20 +130,19 @@ sampled_habitat <- terra::extract(habitat, grid_vect, fun = min, na.rm = TRUE)
 ###############################################
 ############ SAMPLE GRID LOCK OUT VARS ########
 ###############################################
-sampled_pop <- terra::extract(lock_out_pop, grid_vect, fun = min, na.rm = TRUE)
-sampled_lock_out <- terra::extract(lock_out, grid_vect, fun = max, na.rm = TRUE)
+sampled_pop <- terra::extract(pop, grid_vect, fun = min, na.rm = TRUE)
+
 
 sampled_pa_cent<-terra::extract(pa_cent, grid_vect, fun = max, na.rm = TRUE)
 
 # 6. Combine sampled data back with grid for NSGA py optimization
-grid_data <- cbind(grid_clipped, sampled_es[, -1], sampled_cost_es[, -1], sampled_cost_syn[, -1], sampled_condition[, -1], sampled_habitat[, -1], pa_intersects_cell,sampled_pa_cent[,-1],sampled_pop[,-1], sampled_lock_out[,-1])  # remove ID column
-colnames(grid_data)<-c("es_service","cost_agri_es","cost_es_synergy","es_condition","habitat","in_pa","sampled_pa_cent","population","lock_out_pop" ,"geometry")
+grid_data <- cbind(grid_clipped, sampled_es[, -1], sampled_cost_agri[, -1], sampled_cost_syn[, -1], sampled_condition[, -1], sampled_habitat[, -1], pa_intersects_cell,sampled_pa_cent[,-1],sampled_pop[,-1])  # remove ID column
+colnames(grid_data)<-c("iucn_cat","dist_pa_hard","dist_pa","es_mean","cost_agri_es","cost_es_synergy","ec_mean","habitat_class","in_pa","sampled_pa_cent","population","geometry")
 
 ##for each cell calculate how many different lulc types they have borders with (maximize in optim)
 
 # Step 1: Create a spatial index for fast lookup
 grid_data <- grid_data %>% mutate(id = row_number())  # Add unique ID
-
 # 
 nb <- st_relate(grid_data, pattern = "F***T****")  # queen adjacency
 
@@ -159,25 +157,8 @@ diff_neighbors <- sapply(seq_along(nb), function(i) {
 grid_data$habitat_border_count <- diff_neighbors
 
 
-# ### add queen adjecency to PA
-# diff_neighbors_pa <- sapply(seq_along(nb), function(i) {
-#   if (!grid_data$in_pa[i]) {
-#     return(0)
-#   }
-#   pa <- grid_data$in_pa[i]
-#   neighbor_ids <- nb[[i]]
-#   sum(grid_data$in_pa[neighbor_ids] != pa)
-# })
-# 
-# grid_data$pa_border <- diff_neighbors_pa
 
-st_write(grid_data, "SK021_all_low2.json", driver = "GeoJSON", overwrite = T)
+st_write(grid_data, "SK021_all8.json", driver = "GeoJSON", overwrite = T)
 
-##############################
-######### subset to agri #####
-##############################
-target_lulc<-c(200:299)
-out_dat<-grid_data%>%filter(habitat %in% target_lulc)
-st_write(out_dat, "SK021_agri.json", driver = "GeoJSON", overwrite = T)
 
 
