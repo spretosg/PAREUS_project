@@ -17,6 +17,8 @@ sid<-"SK021"
 stud_area<-read_sf(paste0(main_dir,"WP2/PGIS_ES_mapping/raw_data_backup/",sid,"/study_site.gpkg"))%>%filter(siteID %in% sid)
 target_crs <- st_crs(stud_area)$wkt
 
+area_shp<-st_area(stud_area)/10^6
+
 PA<-st_read(paste0(main_dir,"WP4/pa_existing/PA_",sid,"/PA_WGS84.shp"))
 PA<-st_transform(PA,target_crs)
 
@@ -30,12 +32,22 @@ PA_union<-st_union(PA)
 PA_union <- st_sf(geometry = PA_union)
 
 # create a grid for defining the planning units PU for optimization
-grid <- st_make_grid(stud_area, cellsize = 0.02, square = TRUE)
+grid <- st_make_grid(stud_area, cellsize = 0.01, square = TRUE)
 grid <- st_sf(geometry = grid)
 
 # Clip the grid to study area
 grid_clipped <- st_intersection(grid, stud_area)%>%dplyr::select()
 grid_clipped<-st_make_valid(grid_clipped)
+
+
+
+## sample all IUCN categories if itersection
+grid_clipped <- st_join(grid_clipped, PA[, c("IUCN_CAT")], left = TRUE)
+
+## attach area
+grid_clipped$area<-as.numeric(st_area(grid_clipped)/10^6)
+
+
 
 #### sample if cell is in PA (TRUE) or not (FALSE)
 pa_intersects_cell<-st_intersects(grid_clipped,PA_union, sparse = FALSE)
@@ -44,10 +56,6 @@ pa_intersects_cell<-pa_intersects_cell[,1]
 #### sample if cell is in hard_PA (TRUE) or not (FALSE)
 pa_intersects_cell_hard<-st_intersects(grid_clipped,PA_hard, sparse = FALSE)
 pa_intersects_cell_hard<-pa_intersects_cell_hard[,1]
-
-## sample all IUCN categories if itersection
-grid_clipped <- st_join(grid_clipped, PA[, c("IUCN_CAT")], left = TRUE)
-
 
 #### and PA centroids for faster path calculation
 pa_intersects_cent<-st_within(grid_clipped,cent_PA, sparse = FALSE)
@@ -137,7 +145,7 @@ sampled_pa_cent<-terra::extract(pa_cent, grid_vect, fun = max, na.rm = TRUE)
 
 # 6. Combine sampled data back with grid for NSGA py optimization
 grid_data <- cbind(grid_clipped, sampled_es[, -1], sampled_cost_agri[, -1], sampled_cost_syn[, -1], sampled_condition[, -1], sampled_habitat[, -1], pa_intersects_cell,sampled_pa_cent[,-1],sampled_pop[,-1])  # remove ID column
-colnames(grid_data)<-c("iucn_cat","dist_pa_hard","dist_pa","es_mean","cost_agri_es","cost_es_synergy","ec_mean","habitat_class","in_pa","sampled_pa_cent","population","geometry")
+colnames(grid_data)<-c("iucn_cat","area","dist_pa_hard","dist_pa","es_mean","cost_agri_es","cost_es_synergy","ec_mean","habitat_class","in_pa","sampled_pa_cent","population","geometry")
 
 ##for each cell calculate how many different lulc types they have borders with (maximize in optim)
 
@@ -155,10 +163,46 @@ diff_neighbors <- sapply(seq_along(nb), function(i) {
 
 # Step 4: Add result as a new column
 grid_data$habitat_border_count <- diff_neighbors
+# main habitat classes
+grid_data$main_habitat<-grid_data$habitat_class %/%  100
+sum(grid_data$area)
+st_write(grid_data, paste0(sid,"_all9.json"), driver = "GeoJSON", overwrite = T)
 
 
+### gap analysis
+gap_stats <- grid_data %>%st_drop_geometry()%>%
+  group_by(main_habitat) %>%
+  summarise(
+    km2_tot = sum(area, na.rm = TRUE),
+    km2_core_prot = sum(area[iucn_cat %in% c("Ia", "II")], na.rm = TRUE),
+    km2_target_core_prot = 0.1*km2_tot,
+    km2_gap_core_pa = km2_target_core_prot - km2_core_prot,
+    km2_other_pa = sum(area[iucn_cat %in% c("III", "IV","V")], na.rm = TRUE),
+    km2_target_other = 0.2*km2_tot,
+    km2_gap_other_pa = km2_target_other - km2_other_pa
+  )%>%filter(main_habitat %in% c(3,4,5))
 
-st_write(grid_data, "SK021_all8.json", driver = "GeoJSON", overwrite = T)
+# main LULC typers
+required_ids <- c(3, 4, 5)
 
+# Find which required IDs are missing
+missing_ids <- setdiff(required_ids, gap_stats$main_habitat)
 
+# Create rows with missing IDs and 0s
+if (length(missing_ids) > 0) {
+  new_rows <- data.frame(
+    main_habitat = missing_ids,
+    km2_tot = 0,
+    km2_core_prot = 0,
+    km2_target_core_prot = 0,
+    km2_gap_core_pa = 0,
+    km2_other_pa = 0,
+    km2_target_other =0,
+    km2_gap_other_pa = 0
+  )
+  
+  # Append to original data frame
+  gap_stats <- bind_rows(gap_stats, new_rows)
+}
 
+write.csv(gap_stats,paste0(sid,"_gap_stats.csv"))
