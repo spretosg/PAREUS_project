@@ -1,0 +1,207 @@
+/***
+
+THIS SCRIPT EXTRACT DATA STATISTICS IN EVERY OR A SUBSET OF PROTECTED AREAS IN ONE REGION, PER LAND COVER CLASS.
+
+
+*Input* : 
+Ecosystem condition index layer
+
+Use EC_State_V12Buffer_1km to extract the condition layer
+
+
+*Output* : 
+Table with :
+- some statistics (from "dataset" - a raster; resampled according to lulc), here it is the ecosystem condition index
+- for each land cover class ("lulc" - a raster with classes)
+- in some protected areas ("PA" - a feature collection)
+- in an area of interest ("region" - a feature or feature collection)
+
+Stats are sent as a table to Drive.
+Each class is a row (className is the first column).
+Column give the statistics for each class.
+
+By default,
+- the "AnalyzeScale" is the resolution of the LULC file
+- the statistics to extract are defined in the dictionary "reducersDict"
+
+All data to change is in section INPUT DATA
+
+***/
+
+////////////////
+// INPUT DATA //
+////////////////
+
+// Do all or a subset of all PAs?
+var slice_start = 0; // min = 0
+var slice_stop = 10; // max: check first the number of PAs in your region (printed at beginning)
+var subset = true; // true: extract a subset, false: extract all PAs in region
+
+var adm1_code = 1269; // region id according to GAUL FAO
+
+// Define the region of interest using GAUL FAO data
+var region = ee.Feature(ee.FeatureCollection('FAO/GAUL/2015/level1')
+  .filter(ee.Filter.eq('ADM1_CODE', adm1_code))
+  .first())
+  .geometry(); // You can also change the level1 to level0 if you need the whole country, or level2 for a subregion
+
+// Define protected areas within the region and filter by country ISO code
+var PA = ee.FeatureCollection('WCMC/WDPA/202502/polygons')
+  .filterBounds(region)
+  .filter(ee.Filter.eq('ISO3', 'FRA')); // You can remove or change the last filter, it filters the authority of protection
+
+// Load and clip the land cover data to the region
+var lulc = ee.Image("COPERNICUS/CORINE/V20/100m/2018").select('landcover').clip(region);
+var lulc_name = 'LULC'; // for export
+
+// Define the analysis scale based on the land cover data resolution
+var AnalyzeScale = lulc.projection().nominalScale();
+
+// Define the reducers dictionary to specify the statistics to be calculated
+var reducersDict = ee.Dictionary({
+  'mean': ee.Reducer.mean(), // You can add ee.Reducer.percentile to add percentile to the exported stats for example
+  'stdDev': ee.Reducer.stdDev(),
+  'median': ee.Reducer.median(),
+  'min': ee.Reducer.min(),
+  'max': ee.Reducer.max()
+});
+
+// Import the condition layer dataset and resample it to match the land cover data resolution
+var dataset = ee.Image(image); // Import of the condition layer
+var resampledData = dataset.reproject({ crs: lulc.projection(), scale: AnalyzeScale });
+var data_name = 'cond'; // for export
+
+/////////////////
+// MAIN SCRIPT //
+/////////////////
+
+// 1. PROTECTED AREA list and area IN REGION (=/= area of complete PAs)
+// Calculate PA areas in hectares
+var PA_areas = PA.map(function(feature) {
+ feature = feature.intersection(region);
+ var area = feature.geometry().area().divide(10000); // Convert area to hectares
+ return feature.set('area_ha', area)
+ .set('region_ADM1', adm1_code);
+});
+
+print('Number of PA in region', PA_areas.size());
+
+// Create a list of PAs and optionally slice it
+var PA_areas_list = PA_areas.toList(PA_areas.size());
+var PA_areas_sublist = ee.List(ee.Algorithms.If(subset, PA_areas_list.slice(slice_start, slice_stop), PA_areas_list));
+print('PA sublist', PA_areas_sublist);
+
+// Extract unique IDs of PAs
+var uniq_ID = PA_areas.aggregate_array('WDPAID').distinct().sort();
+var uniq_ID_str = uniq_ID.map(function(float) { return ee.String(ee.Number(float).toInt()); });
+
+// For step 5: Combine reducers
+var statsNames = reducersDict.keys();
+var reducersList = reducersDict.values();
+
+// Function to combine reducers
+var function_reducers_combination = function(currentReducer, previousComb) {
+ return ee.Reducer(previousComb).combine({ reducer2: currentReducer, sharedInputs: true });
+};
+
+// Initialize and iterate to combine reducers
+var reducers = reducersList.get(0); // Initialization
+reducers = reducersList.slice(1) // Remove the first reducer already in reducers
+  .iterate(function_reducers_combination, reducers);
+
+// Map over PAs to calculate statistics
+var multiStats_list_of_list = PA_areas_sublist.map(function(feature) {
+   feature = ee.Feature(feature);
+
+  // 2. CLIP BY PROTECTED AREA
+  var pai_id = feature.get('WDPAID');
+  var pai_region = feature.intersection(region).geometry();
+  var pai_lulc = lulc.clip(pai_region);
+  var resampledData_pai = resampledData.clip(pai_region);
+
+  var designation_pa = feature.get('DESIG');
+  var IUCN_cat = feature.get('IUCN_CAT');
+
+  // 3. LULC CLASS LIST and area of each class IN PROTECTED AREA, IN REGION
+  var nbPixelsClasses = ee.Dictionary(pai_lulc.reduceRegion({
+    reducer: ee.Reducer.frequencyHistogram(),
+    geometry: pai_region,
+    scale: AnalyzeScale,
+    maxPixels: 1e9
+  }).get('landcover'));
+
+  var listClasses = nbPixelsClasses.keys();
+
+  // Calculate area per class (in hectares)
+  var classesArea = nbPixelsClasses.map(function(key, value) {
+    return ee.Number(value).multiply(AnalyzeScale.multiply(AnalyzeScale)).divide(10000); // Convert to hectares
+  });
+
+  var totalPixels = nbPixelsClasses.values().reduce(ee.Reducer.sum());
+
+  // 4. MASK DATA PER CLASS
+  // Function to mask data image with 1 lulc class
+  var function_datamask_perclass = function(classValue_str) {
+    var classValue = ee.Number.parse(classValue_str);
+    var mask = pai_lulc.eq(classValue);
+    var maskedPerClassData = resampledData_pai.updateMask(mask);
+    return maskedPerClassData.rename([classValue_str]);
+  };
+
+  // Map over the classes to create masked bands and convert to list of images
+  var maskedPerClassData_list = listClasses.map(function_datamask_perclass);
+
+  // 5. CALCULATE STATS
+  // Map over each image in list to get a list of features with statistics properties
+  var multiStats_list = maskedPerClassData_list.map(function(img) {
+    var dict_properties = ee.Image(img).reduceRegion({
+      reducer: reducers,
+      geometry: pai_region,
+      scale: AnalyzeScale,
+      maxPixels: 1e9
+    });
+
+    var names_dict = dict_properties.keys();
+    var renamed_dict = dict_properties.rename(names_dict, statsNames);
+    var className = ee.String(ee.Image(img).bandNames().get(0));
+
+    var complete_dict = renamed_dict.set('LULC_class', className)
+      .set('PA_ID', pai_id)
+      .set('PA_ha', pai_region.area().divide(10000))
+      .set('LULC_in_PA_ha', classesArea.get(className))
+      .set('Variable', data_name)
+      .set('PA_type', designation_pa)
+      .set('IUCN_cat', IUCN_cat);
+
+    return ee.Feature(null, complete_dict);
+  });
+
+  return multiStats_list;
+});
+
+// 6. EXPORT TO DRIVE
+var multiStats_flattened = multiStats_list_of_list.flatten();
+var multiStats_FC = ee.FeatureCollection(multiStats_flattened);
+print('Result (long to print if not sliced)', multiStats_FC);
+
+var slices_name = 'slice' + slice_start + '-' + slice_stop;
+var name_ending = ee.Algorithms.If(subset, slices_name, 'All');
+var file_name = 'stats_' + data_name + '_' + lulc_name + '_Region_' + adm1_code + '_PA_' + name_ending.getInfo();
+
+Export.table.toDrive({
+  collection: multiStats_FC,
+  description: file_name,
+  fileFormat: 'CSV',
+  folder: 'PAREUS',
+  fileNamePrefix: file_name
+});
+
+// 7. SHOW THE LAYERS
+var visParams = {
+    min: 0,
+    max: 1,
+    palette: ['red', 'yellow', 'green'] };
+
+Map.centerObject(PA);
+Map.addLayer(dataset,visParams);
+Map.addLayer(PA);

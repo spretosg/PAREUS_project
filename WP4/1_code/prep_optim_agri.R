@@ -6,6 +6,8 @@
 library(sf)
 library(terra)
 library(dplyr)
+library(wdpar)
+
 source("WP4/1_code/wp4_functions_utils.R")
 
 ########################################
@@ -18,6 +20,15 @@ stud_area<-read_sf(paste0(main_dir,"WP2/PGIS_ES_mapping/raw_data_backup/",sid,"/
 target_crs <- st_crs(stud_area)$wkt
 
 area_shp<-st_area(stud_area)/10^6
+
+############################
+###### protected areas #####
+############################
+## download from wdpa and crop with study area, convert to raster for sampling
+PA <- wdpa_fetch(
+  "Slovakia", wait = TRUE, download_dir = rappdirs::user_data_dir("wdpar")
+)
+
 
 PA<-st_read(paste0(main_dir,"WP4/pa_existing/PA_",sid,"/PA_WGS84.shp"))
 PA<-st_transform(PA,target_crs)
