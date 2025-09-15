@@ -1,8 +1,9 @@
 ### calculate mean raster per ES
 
 library(terra)
-
-main_dir<-"P:/312204_pareus/WP2/PGIS_ES_mapping/raw_data_backup/SK021"
+source("WP2/wp2_functions_utils.R")
+stud_id<-"FRL04"
+main_dir<-paste0("P:/312204_pareus/WP2/T2.2/PGIS_ES_mapping/",stud_id,"/raw_data_backup")
 eval_round<-"R1" #R2
 
 if(eval_round == "R1"){
@@ -11,7 +12,7 @@ if(eval_round == "R1"){
   target_dir <-"/5_ind_R2"
 }
 
-library(terra)
+
 
 
 # List the first 10 subfolders
@@ -31,13 +32,25 @@ for (folder in subfolders) {
 
   # Calculate mean raster
   mean_raster <- mean(raster_stack, na.rm = TRUE)
+  cv_raster <- cv_rast(raster_stack)
 
   # Create output filename
-  folder_name <- basename(folder)
-  out_file <- file.path(folder, paste0(folder_name, "_mean.tif"))
+  # folder_name <- basename(folder)
+  mean_path<-paste0(main_dir,"/4_mean_",eval_round)
+  cv_path<-paste0(main_dir,"/5_cv_",eval_round)
+  if(!exists(mean_path)){
+    dir.create(mean_path)
+  }
+  if(!exists(cv_path)){
+    dir.create(cv_path)
+  }
+  out_mean<- file.path(mean_path, paste0(basename(folder), "_mean.tif"))
+  out_cv<- file.path(cv_path, paste0(basename(folder), "_cv.tif"))
+  names(mean_raster)<-basename(folder)
+  names(cv_raster)<-basename(folder)
 
-  # Save the mean raster
-  writeRaster(mean_raster, out_file, overwrite = TRUE)
+  writeRaster(mean_raster, out_mean, overwrite = TRUE)
+  writeRaster(cv_raster, out_cv, overwrite = TRUE)
 
-  cat("Saved mean raster to:", out_file, "\n")
+  cat("Saved to:", main_dir, "\n")
 }

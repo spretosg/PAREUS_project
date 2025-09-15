@@ -9,7 +9,8 @@ library(googleCloudStorageR)
 # library(rnaturalearthdata)
 
 #store the raw data on nina servers
-out_master_path<-"P:/312204_pareus/WP2/PGIS_ES_mapping/raw_data_backup"
+stud_id<-"FRL04"
+out_master_path<-paste0("P:/312204_pareus/WP2/T2.2/PGIS_ES_mapping/",stud_id,"/raw_data_backup")
 dev<-"dev"
 id<-"pareus"
 
@@ -25,11 +26,11 @@ if(id == "wendy"){
 }
 
 bq_auth(
-  path = paste0("docs/gcs_keys/",project_id,"_key.json")
+  path = paste0("docs/",project_id,"_key.json")
 )
 
 
-cred_path<-paste0("docs/gcs_keys/",project_id,"_key.json")
+cred_path<-paste0("docs/",project_id,"_key.json")
 gcs_auth(cred_path)
 bucket<-paste0(id,"_geopros_",dev)
 gcs_global_bucket(bucket)
@@ -84,7 +85,7 @@ if(is.null(list.files(out_master_path))){
 }
 
 ## download all raster:
-pattern<-"SK021/5_ind_R2"
+pattern<-paste0(stud_id,"/3_ind_R1")
 
 objects <- gcs_list_objects(prefix = pattern)
 # Create local folder to store the files
@@ -96,7 +97,7 @@ for (obj in objects$name) {
   message("Downloading: ", obj)
 
   # Strip the prefix from path to preserve folder structure locally
-  relative_path <- sub("^SK021/5_ind_R2", "", obj)
+  relative_path <- sub(paste0("^",stud_id,"/5_ind_R2"), "", obj)
   local_path <- file.path(local_dir, relative_path)
   dir.create(dirname(local_path), recursive = TRUE, showWarnings = FALSE)
 
