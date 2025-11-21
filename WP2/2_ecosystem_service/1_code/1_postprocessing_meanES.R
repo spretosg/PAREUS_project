@@ -2,7 +2,7 @@
 
 library(terra)
 source("WP2/wp2_functions_utils.R")
-stud_id<-"FRL04"
+stud_id<-"FRA_BAR2"
 main_dir<-paste0("P:/312204_pareus/WP2/T2.2/PGIS_ES_mapping/",stud_id,"/raw_data_backup")
 eval_round<-"R1" #R2
 
