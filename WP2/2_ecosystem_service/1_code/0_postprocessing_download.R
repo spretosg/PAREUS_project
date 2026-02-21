@@ -19,11 +19,7 @@ id<-"pareus"
 
 dataset<-paste0(id,"_",dev)
 
-if(id == "wendy"){
-  project_id<-"eu-wendy"
-}else{
-  project_id<-id
-}
+
 
 bq_auth(
   path = paste0("docs/",project_id,"_key.json")
