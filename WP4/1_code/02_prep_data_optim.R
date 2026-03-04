@@ -1,7 +1,7 @@
 ## test data read tif
 ## make pu of stud area
 ## sample cost, es_cond and es_capacity per PU
-## save as json upload gcs bucket for python
+
 library(sf)
 library(terra)
 library(dplyr)
@@ -10,13 +10,13 @@ source("WP4/1_code/wp4_functions_utils.R")
 
 
 main_dir<-"P:/312204_pareus/"
-siteID<-"SK021"
+siteID<-"FRA_BAR2"
 
 ## read cost based on es
 cost<-terra::rast(paste0(main_dir,"WP4/cost_raster_es/",siteID,"_cost_raster_es.tif"))
 
 #read all es_make mean es as features 1
-es_raster_files <- list.files(paste0(main_dir,"WP2/T2.2/PGIS_ES_mapping/",siteID,"/raw_data_backup/4_mean_R1"), full.names = TRUE)
+es_raster_files <- list.files(paste0(main_dir,"WP2/T2.2/PGIS_ES_mapping/",siteID,"/raw_data_backup/4_mean_R1"),pattern = "\\.tif$", full.names = TRUE)
 # 2. Read all rasters
 es_raster <- terra::rast(es_raster_files)
 
@@ -45,7 +45,7 @@ pop30<-terra::rast(pop30)
 
 ## stud_area 
 stud_area<-read_sf(paste0(main_dir,"WP2/T2.2/PGIS_ES_mapping/",siteID,"/raw_data_backup/stud_site.gpkg"))
-stud_area<-st_transform(stud_area,2154)%>%filter(siteID =="SK021")
+stud_area<-st_transform(stud_area,2154)%>%filter(siteID =="FRA_BAR2")
 st_area(stud_area)/ 1e6
 ### make pu
 target_crs <- st_crs(stud_area)$wkt  # Use WKT for terra
@@ -63,7 +63,7 @@ pop25 <-project(pop25, target_crs)
 pop30 <-project(pop30, target_crs)
 
 ## existing PA
-PA<-st_read(paste0(main_dir,"WP4/pa_existing/WDPA_SK021.shp"))
+PA<-st_read(paste0(main_dir,"WP4/pa_existing/WDPA_FRL04.shp"))
 PA<-st_transform(PA,st_crs(target_crs))
 PA <- st_intersection(PA, stud_area)
 PA<-st_make_valid(PA)
@@ -107,12 +107,6 @@ grid$sampled_habitat <- terra::extract(
 )[,2]
 
 
-
-
-# grid%>%st_drop_geometry()%>%filter(sampled_habitat>0)%>%
-#   group_by(sampled_habitat)%>%
-#   summarise(n = n())
-
 #sampling number of PA in one cell
 # get intersection index list
 ints <- st_intersects(grid, PA)
@@ -155,4 +149,4 @@ grid_clean<- zero_one_scale(
 )
 
 
-st_write(grid_clean, paste0(siteID,"_optim_grid_210226a.json"), driver = "GeoJSON", overwrite = T)
+st_write(grid_clean, paste0("WP4/2_output/02_optim/",siteID,"_input_grid.json"), driver = "GeoJSON", overwrite = T)

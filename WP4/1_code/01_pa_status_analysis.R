@@ -6,7 +6,7 @@ library(dplyr)
 library(ggplot2)
 
 # siteID<-"FRL04"
-siteID<-"SK021"
+siteID<-"FRA_BAR2"
 
 main_dir<-"P:/312204_pareus/"
 
@@ -14,7 +14,7 @@ main_dir<-"P:/312204_pareus/"
 
 ## stud_area 
 stud_area<-read_sf(paste0(main_dir,"WP2/T2.2/PGIS_ES_mapping/",siteID,"/raw_data_backup/stud_site.gpkg"))
-stud_area<-stud_area%>%filter(siteID=="SK021")
+stud_area<-stud_area%>%filter(siteID=="FRA_BAR2")
 target_crs <- 2154 #adjust this for the area
 stud_area<-st_transform(stud_area,target_crs)
 total_area<-st_area(stud_area)
@@ -44,23 +44,29 @@ area_stats_IUCN<-PA%>%group_by(IUCN_CAT)%>%
 
 
 #plot
-ggplot(area_stats_IUCN, 
+p<-ggplot(area_stats_IUCN, 
        aes(x = reorder(IUCN_CAT, -area_km2_uni),
            y = area_km2_uni)) +
   geom_col(fill = "steelblue") +
-  labs(x = "IUCN Category",
+  labs(title = paste0(siteID," Area by IUCN Category"),
+        x = "IUCN Category",
        y = "Area (km²)") +
   theme_minimal(base_size = 14)
+  
+ggsave(paste0("WP4/2_output/01_PA_analysis/",siteID,"_area_stats_IUCN.png"), plot = p, width = 8, height = 6, dpi = 300)
 
-ggplot() +
+p<-ggplot() +
   geom_sf(data = stud_area, fill = "grey95", color = "black") +
   geom_sf(data = PA, aes(fill = IUCN_CAT), color = NA, alpha = 0.8) +
   scale_fill_brewer(palette = "Set2", name = "IUCN Category") +
   theme_minimal()
+ggsave(paste0("WP4/2_output/01_PA_analysis/",siteID,"_maps_IUCN.png"), plot = p, width = 8, height = 6, dpi = 300)
+
+
 
 ###reclass lulc
 lulc_recl<- floor(lulc / 100)
-plot(lulc_recl)
+#plot(lulc_recl)
 
 # reclass PA importance
 PA <- PA %>%
@@ -82,7 +88,7 @@ PA <- PA %>%
 split_PA <- st_intersection(PA) %>%
   group_by(geometry) %>%
   slice_max(num_degree_prot, n = 1) %>%
-  ungroup()%>%select(IUCN_CAT,num_degree_prot)
+  ungroup()%>%dplyr::select(IUCN_CAT,num_degree_prot)
 
 sum(st_area(split_PA))
 iucn_union <- split_PA %>% mutate(strict_pa = case_when(num_degree_prot <6 ~ F,
@@ -138,18 +144,21 @@ final<-final%>%mutate(LULC_class = case_when(value ==1 ~ "artificial_surfaces",
                                              value ==2 ~ "agricultural_areas",
                                              value ==3 ~ "forests_semi_natural",
                                              value ==4 ~ "wetlands",
-                                             value ==5 ~ "water"))%>%select(LULC_class,lulc_tot_area_m2,strict_pa,area,prot_frac)
+                                             value ==5 ~ "water"))%>%dplyr::select(LULC_class,lulc_tot_area_m2,strict_pa,area,prot_frac)
 colnames(final)<-c("lulc_class","tot_lulc_area_m2","strict_pa","prot_area_m2","rel_protection")
 
 gap_strict_pa<-final%>%filter(lulc_class %in% c("forests_semi_natural","water","wetlands") & strict_pa == T)%>%
   mutate(delta_strict_PA_km2 = ((tot_lulc_area_m2*0.1)-(tot_lulc_area_m2*rel_protection))/10^6)
 
-ggplot(gap_strict_pa, 
+p<-ggplot(gap_strict_pa, 
        aes(x = reorder(lulc_class, -delta_strict_PA_km2),
            y = delta_strict_PA_km2)) +
   geom_col(fill = "steelblue") +
-  labs(x = "LULC",
-       y = "Gap (km²) of strict protected area (Ia/II) to protect 10%") +
+  labs(title = paste0(siteID," gap to protect of strict protected area (Ia/II) to protect 10% of the total LULC area"),
+       x = "LULC",
+       y = "km²") +
   theme_minimal(base_size = 14)
+ggsave(paste0("WP4/2_output/01_PA_analysis/",siteID,"_gap_strict_prot.png"), plot = p, width = 8, height = 6, dpi = 300)
+
 
 write.csv(final,paste0(siteID,"_gap_analysis.csv"))
