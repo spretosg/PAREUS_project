@@ -30,7 +30,7 @@ for(g in 1:nrow(group_vec)){
   num_grp<-as.numeric(group_vec[g,])
   tmp_dat<-es_pair%>%filter(ahp_section %in% num_grp)%>%select(userID,selection_val, ES_left, ES_right)
   tmp_dat$pair<-paste0(tmp_dat$ES_left,"_",tmp_dat$ES_right)
-  tDat<-tmp_dat%>%select(selection_val, pair, userID)%>%
+  tDat<-tmp_dat%>%select(selection_val, pair, userID)%>%group_by(pair, userID)%>%summarise(selection_val = mean(selection_val,na.rm=T))%>%
     pivot_wider(id_cols = userID, id_expand = F,  names_from = pair, values_from = selection_val)
   tDat<-tDat[, -1]
 
@@ -52,10 +52,10 @@ for(g in 1:nrow(group_vec)){
   agree_list[[g]]<-c(icc_res$value,grp_names_vec[num_grp],stud_id)
 
 }
-ind_reg<-1
+ind_reg<-3
 ind_cult<-2
-ind_prov<-3
-ind_all<-4
+ind_prov<-4
+ind_all<-1
 
 main<-as.data.frame(t(pref_list[[ind_all]]))
 reg<-as.data.frame(pref_list[[ind_reg]])
