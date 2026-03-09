@@ -1,8 +1,9 @@
 library(ahpsurvey)
 library(tidyr)
 library(tidyverse)
+library(dplyr)
 library(irr)
-stud_id<-"FRL04"
+stud_id<-"FRA_BAR2"
 main_path<-paste0("P:/312204_pareus/WP2/T2.2/PGIS_ES_mapping/",stud_id,"/raw_data_backup")
 
 es_pair<-read.csv(paste0(main_path,"/es_pair.csv"))
@@ -28,9 +29,9 @@ group_vec<-es_pair%>%distinct(ahp_section)
 
 for(g in 1:nrow(group_vec)){
   num_grp<-as.numeric(group_vec[g,])
-  tmp_dat<-es_pair%>%filter(ahp_section %in% num_grp)%>%select(userID,selection_val, ES_left, ES_right)
+  tmp_dat<-es_pair%>%filter(ahp_section %in% num_grp)%>%dplyr::select(userID,selection_val, ES_left, ES_right)
   tmp_dat$pair<-paste0(tmp_dat$ES_left,"_",tmp_dat$ES_right)
-  tDat<-tmp_dat%>%select(selection_val, pair, userID)%>%group_by(pair, userID)%>%summarise(selection_val = mean(selection_val,na.rm=T))%>%
+  tDat<-tmp_dat%>%dplyr::select(selection_val, pair, userID)%>%dplyr::group_by(pair, userID)%>%summarise(selection_val = mean(selection_val,na.rm=T))%>%
     pivot_wider(id_cols = userID, id_expand = F,  names_from = pair, values_from = selection_val)
   tDat<-tDat[, -1]
 

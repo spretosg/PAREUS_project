@@ -27,6 +27,13 @@ lulc <- project(lulc, paste0("epsg:",target_crs))
 lulc <- crop(lulc, stud_ara_vect)
 lulc <- mask(lulc, stud_ara_vect)
 
+# EC for differences in EC between PA
+ec<-paste0(main_dir,"WP4/features/",siteID,"_ec.tif")
+ec<-terra::rast(ec)
+ec <- project(ec, paste0("epsg:",target_crs))
+ec <- crop(ec, stud_ara_vect)
+ec <- mask(ec, stud_ara_vect)
+
 # PA
 PA<-st_read(paste0(main_dir,"WP4/pa_existing/WDPA_",siteID,".shp"))
 PA<-st_transform(PA,target_crs)
@@ -35,6 +42,7 @@ PA<-st_make_valid(PA)
 #crop to study area
 PA<-st_intersection(PA,stud_area)
 
+#### ---- Area statistics ----
 #pa categories
 area_stats_IUCN<-PA%>%group_by(IUCN_CAT)%>%
   summarise(area_km2 = sum(st_area(geometry)),
@@ -162,3 +170,45 @@ ggsave(paste0("WP4/2_output/01_PA_analysis/",siteID,"_gap_strict_prot.png"), plo
 
 
 write.csv(final,paste0(siteID,"_gap_analysis.csv"))
+
+#### ---- Condition statistics ####
+
+
+# 2. Extract ec values inside PA by IUCN category
+pa_vals <- extract(ec, PA)
+
+# attach category
+pa_vals$IUCN_cat <- PA$IUCN_CAT[pa_vals$ID]
+
+# remove ID column
+pa_vals <- pa_vals[, c("IUCN_CAT", names(int))]
+
+# 3. Create raster of PA footprint
+pa_r <- rasterize(PA, ec)
+
+# 4. Values outside PA
+ec_out <- mask(ec, pa_r, inverse=TRUE)
+
+out_vals <- values(ec, na.rm=TRUE)
+out_df <- data.frame(
+  IUCN_cat = "Outside_PA",
+  ec = out_vals
+)
+colnames(out_df)[2] <- "ec"
+
+# 5. Combine
+colnames(pa_vals)[2] <- "ec"
+df <- rbind(pa_vals%>%select(IUCN_cat,ec), out_df)
+
+# 6. Boxplot
+ggplot(df, aes(x=IUCN_cat, y=ec)) +
+  geom_boxplot() +
+  theme_bw() +
+  labs(x="IUCN Category", y="EC value") +
+  theme(axis.text.x = element_text(angle=45, hjust=1))
+
+#test
+set.seed(1)
+df_sample <- df[sample(nrow(df), 5000), ]
+kruskal.test(ec ~ IUCN_cat, data=df_sample)
+pairwise.wilcox.test(df_sample$ec, df_sample$IUCN_cat, p.adjust.method="BH")

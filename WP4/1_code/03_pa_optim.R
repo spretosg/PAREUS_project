@@ -6,9 +6,9 @@ library(dplyr)
 library(gdistance)
 
 main_dir<-"P:/312204_pareus/"
-siteID<-"SK021"
+siteID<-"FRA_BAR2"
 stud_area<-read_sf(paste0(main_dir,"WP2/T2.2/PGIS_ES_mapping/",siteID,"/raw_data_backup/stud_site.gpkg"))
-stud_area<-stud_area%>%filter(siteID=="SK021")
+stud_area<-stud_area%>%filter(siteID=="FRA_BAR2")
 
 pu<-st_read(paste0("WP4/2_output/02_optim/",siteID,"_input_grid.json"))
 pu$ID<-c(1:nrow(pu))
@@ -40,8 +40,8 @@ plot(st_as_sf(pu[, "lock_in"]), main = "lock_in")
 p_for <-
   problem(pu_for, c("sampled_reg_scaled","sampled_condition_scaled","inv_dist"), cost_column = c("sampled_cost_scaled")) %>%
   add_min_set_objective() %>%
-  #add_boundary_penalties(penalty = 0.005) %>%
-  add_neighbor_constraints(k = 4) %>%
+  add_boundary_penalties(penalty = 0.0005) %>%
+  add_neighbor_constraints(k = 7) %>%
   add_relative_targets(0.1) %>%
   add_locked_out_constraints("lock_in") %>%
   add_binary_decisions()
@@ -221,7 +221,7 @@ stats_path <- pu %>%filter(imp_corridor==T)%>%
   group_by(sampled_habitat, prot_class) %>%
   summarise(area_km2 = n())%>%st_drop_geometry()
 
-p<-ggplot(pu %>% filter(n_paths_rel > 0.02)%>%select(n_paths_rel)) +
+p<-ggplot(pu %>% filter(n_paths_rel > 0.02)%>%dplyr::select(n_paths_rel)) +
   geom_sf(aes(fill = n_paths_rel), color = NA) +
   labs(title = "Important corridors",
        fill = "n_paths_rel") +

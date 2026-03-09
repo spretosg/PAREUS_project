@@ -9,7 +9,7 @@ library(googleCloudStorageR)
 # library(rnaturalearthdata)
 
 #store the raw data on nina servers
-stud_id<-"FRL04"
+stud_id<-"FRA_BAR2"
 out_master_path<-paste0("P:/312204_pareus/WP2/T2.2/PGIS_ES_mapping/",stud_id,"/raw_data_backup")
 dev<-"dev"
 project_id<-"pareus"
@@ -17,7 +17,7 @@ project_id<-"pareus"
 #############
 
 
-dataset<-paste0(id,"_",dev)
+dataset<-paste0(project_id,"_",dev)
 
 
 

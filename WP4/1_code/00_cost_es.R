@@ -4,7 +4,7 @@ library(sf)
 library(dplyr)
 library(ppcor)
 
-stud_id<-"FRL04"
+stud_id<-"FRA_BAR2"
 main_dir<-paste0("P:/312204_pareus/WP2/T2.2/PGIS_ES_mapping/",stud_id,"/raw_data_backup")
 
 out_dir<-"P:/312204_pareus/WP4/cost_raster_es"
