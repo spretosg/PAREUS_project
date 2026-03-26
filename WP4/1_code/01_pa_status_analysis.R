@@ -6,7 +6,7 @@ library(dplyr)
 library(ggplot2)
 
 # siteID<-"FRL04"
-siteID<-"FRA_BAR2"
+siteID<-"SK021"
 
 main_dir<-"P:/312204_pareus/"
 
@@ -14,7 +14,7 @@ main_dir<-"P:/312204_pareus/"
 
 ## stud_area 
 stud_area<-read_sf(paste0(main_dir,"WP2/T2.2/PGIS_ES_mapping/",siteID,"/raw_data_backup/stud_site.gpkg"))
-stud_area<-stud_area%>%filter(siteID=="FRA_BAR2")
+stud_area<-stud_area%>%filter(siteID=="SK021")
 target_crs <- 2154 #adjust this for the area
 stud_area<-st_transform(stud_area,target_crs)
 total_area<-st_area(stud_area)
@@ -180,8 +180,6 @@ pa_vals <- extract(ec, PA)
 # attach category
 pa_vals$IUCN_cat <- PA$IUCN_CAT[pa_vals$ID]
 
-# remove ID column
-pa_vals <- pa_vals[, c("IUCN_CAT", names(int))]
 
 # 3. Create raster of PA footprint
 pa_r <- rasterize(PA, ec)
@@ -195,20 +193,25 @@ out_df <- data.frame(
   ec = out_vals
 )
 colnames(out_df)[2] <- "ec"
+colnames(pa_vals)[2] <- "ec"
 
 # 5. Combine
-colnames(pa_vals)[2] <- "ec"
 df <- rbind(pa_vals%>%select(IUCN_cat,ec), out_df)
 
 # 6. Boxplot
-ggplot(df, aes(x=IUCN_cat, y=ec)) +
+p<-ggplot(df, aes(x=IUCN_cat, y=ec)) +
   geom_boxplot() +
   theme_bw() +
-  labs(x="IUCN Category", y="EC value") +
+  labs(x="IUCN Category", y="Ecosystem condition") +
   theme(axis.text.x = element_text(angle=45, hjust=1))
+ggsave(paste0("WP4/2_output/01_PA_analysis/",siteID,"_EC_IUCN.png"), plot = p, width = 8, height = 6, dpi = 300)
 
 #test
-set.seed(1)
-df_sample <- df[sample(nrow(df), 5000), ]
-kruskal.test(ec ~ IUCN_cat, data=df_sample)
-pairwise.wilcox.test(df_sample$ec, df_sample$IUCN_cat, p.adjust.method="BH")
+set.seed(13)
+df_sample <- df[sample(nrow(df), 10000), ]
+kw<-kruskal.test(ec ~ IUCN_cat, data=df_sample)
+pair_test<-pairwise.wilcox.test(df_sample$ec, df_sample$IUCN_cat, p.adjust.method="BH")
+capture.output(
+  pair_test,
+  file = paste0("WP4/2_output/01_PA_analysis/",siteID,"_kw_pair.txt")
+)
