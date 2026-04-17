@@ -40,3 +40,15 @@ zero_one_scale <- function(sf_df, cols = NULL, na.rm = TRUE) {
       )
     )
 }
+
+oecm_lin_w<-function(cult_es,prov_es,ec,conn,w_cult,w_prov,w_ec,w_connect){
+  weighted_sum <- cult_es * w_cult +
+    prov_es * w_prov +
+    ec * w_ec +
+    conn * w_connect
+  
+  weight_total <- w_cult + w_prov + w_ec + w_connect
+  
+  return(weighted_sum / weight_total)
+  
+}
