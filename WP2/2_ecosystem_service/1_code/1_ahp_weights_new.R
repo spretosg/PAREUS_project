@@ -4,7 +4,7 @@ library(tidyverse)
 library(dplyr)
 
 
-stud_id<-"rescape_TRD"
+stud_id<-"FRA_BAR2"
 main_path<-paste0("P:/312204_pareus/WP2/T2.2/PGIS_ES_mapping/",stud_id,"/raw_data_backup")
 
 es_pair<-read.csv(paste0(main_path,"/es_pair.csv"))%>%filter(siteID == stud_id)
@@ -108,9 +108,9 @@ df_cr <- data.frame(CR = cr_vec)
 
 
 ind_prov<-3
-ind_cult<-2
-ind_all<-4
-ind_reg<-1
+ind_cult<-4
+ind_all<-1
+ind_reg<-2
 
 
 main<-as.data.frame(t(pref_list[[ind_all]]))
@@ -144,5 +144,6 @@ all_fin$pref_adj<-all_fin$pref_tmp*all_fin$adj_glob
 
 all_fin<-all_fin%>%rownames_to_column(var = "esID")
 all_fin$siteID<-rep(stud_id,nrow(all_fin))
+sum(all_fin$pref_adj)
 
 write.csv(all_fin,paste0(main_path,"/ahp_weights.csv"))

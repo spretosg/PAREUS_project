@@ -30,46 +30,57 @@ ind_pols<-read_sf(paste0(main_dir,"/ind_polys_",eval_round,".gpkg"))%>%dplyr::fi
 
 #### ---- create a kernel density map for each es ####
 # 1. Create centroids and a numeric weight
-polys_proj<-ind_pols%>%filter(esID =="recr")
-pts <- st_centroid(polys_proj)
+# polys_proj<-ind_pols%>%filter(esID =="recr")
+# pts <- st_centroid(polys_proj)
+# 
+# 
+# ### IDW
+# # Create interpolation grid (choose resolution)
+# r <- rast(ext(mean_raster), res = 0.005) 
+# crs(r) <- st_crs(pts)$wkt
+# xy <- terra::xyFromCell(r, 1:ncell(r))
+# coop <- st_as_sf(as.data.frame(xy), coords = c("x", "y"),
+#                  crs = st_crs(pts))
+# 
+# 
+# ### distance based only
+# # If pts has 0 rows → return pts unchanged with dist column
+# if (nrow(coop) == 0) {
+#   coop$mindist <- numeric(0)
+# } else {
+#   distmat <- st_distance(coop, pts)
+#   coop$mindist <- apply(distmat, 1, min)
+# }
+# pred <- terra::rasterize(coop, r, field = "mindist", fun = "mean")
+# # mn <- global(pred, "min", na.rm = TRUE)[1]
+# # mx <- global(pred, "max", na.rm = TRUE)[1]
+# pred_log <- log(pred)
+# 
+# # pred <- (pred - as.numeric(mn)+1) / (as.numeric(mx)-as.numeric(mn))
+# pred_sum <- global(pred_log, "sum", na.rm = TRUE)[1]
+# w <- pred_log / as.numeric(global(pred_log, "max", na.rm = TRUE)[1])
+# w<-terra::resample(w,mean_raster,"bilinear")
 
+rast_weights<-read.csv(paste0(main_dir,"/es_mapping",eval_round,".csv"))%>%filter(siteID == stud_id)
+#### ---- Loop through each subfolder#### (we need to weight it with uncertainty!)
 
-### IDW
-# Create interpolation grid (choose resolution)
-r <- rast(ext(mean_raster), res = 0.005) 
-crs(r) <- st_crs(pts)$wkt
-xy <- terra::xyFromCell(r, 1:ncell(r))
-coop <- st_as_sf(as.data.frame(xy), coords = c("x", "y"),
-                 crs = st_crs(pts))
-
-
-### distance based only
-# If pts has 0 rows → return pts unchanged with dist column
-if (nrow(coop) == 0) {
-  coop$mindist <- numeric(0)
-} else {
-  distmat <- st_distance(coop, pts)
-  coop$mindist <- apply(distmat, 1, min)
-}
-pred <- terra::rasterize(coop, r, field = "mindist", fun = "mean")
-# mn <- global(pred, "min", na.rm = TRUE)[1]
-# mx <- global(pred, "max", na.rm = TRUE)[1]
-pred_log <- log(pred)
-
-# pred <- (pred - as.numeric(mn)+1) / (as.numeric(mx)-as.numeric(mn))
-pred_sum <- global(pred_log, "sum", na.rm = TRUE)[1]
-w <- pred_log / as.numeric(global(pred_log, "max", na.rm = TRUE)[1])
-w<-terra::resample(w,mean_raster,"bilinear")
-
-#### ---- Loop through each subfolder####
+grand_mean<-rast()
 for (folder in subfolders) {
-
+  
   # List all raster files (you can adjust the pattern if needed)
   raster_files <- list.files(folder, full.names = TRUE)
-
-  # Read all rasters into a SpatRaster list
+  es_tmp<-sub(".*/", "", folder)
   rasters <- lapply(raster_files, rast)
+  rasters <- terra::rast(rasters)
+
+  ind_weights<-rast_weights%>%filter(esID==es_tmp)%>%select(confidence,userID)%>%mutate(conf_adj = case_when(confidence>0 ~confidence/5,
+                                                                                                             confidence == 0 ~ 0))
   
+  ind_weights <- ind_weights %>%
+    filter(userID %in% names(rasters)) %>%
+    mutate(idx = match(userID, names(rasters))) %>%
+    arrange(idx)
+
   ### validate only use not 0 rasters
   valid_rasters <- lapply(raster_files, function(f) {
     r <- rast(f)
@@ -94,12 +105,20 @@ for (folder in subfolders) {
     raster_stack <- rast(valid_rasters)
   }
   
-
-
+  raster_stack <- raster_stack[[ind_weights$idx]]   # reorder raster too (extra safety)
+  
+  #confidence weighted raster (not es importance weighted!)
+  r_weighted <- raster_stack * ind_weights$conf_adj
+  
 
   # Calculate mean raster
 
-  mean_raster <- mean(raster_stack, na.rm = TRUE)
+  mean_raster <- mean(r_weighted, na.rm = TRUE)
+  #weight with ahp ratings
+  tmp_rating<-as.numeric(es_ratings%>%filter(esID==es_tmp)%>%select(pref_adj))
+  mean_rast_w<-mean_raster*tmp_rating
+  grand_mean<-c(grand_mean,mean_rast_w)
+  
   crs(mean_raster) <- "EPSG:4326"
   
   cv_raster <- cv_rast(raster_stack)
@@ -135,6 +154,11 @@ for (folder in subfolders) {
   cat("Saved to:", main_dir, "\n")
 }
 
+w_mean<-sum(grand_mean,na.rm=T)
+
+names(w_mean)<-"es_weighted_mean"
+
+writeRaster(w_mean, "P:/312204_pareus/WP2/T2.2/PGIS_ES_mapping/FRL04/es_weight_mean.tif", overwrite = TRUE)
+
 ## subset ind_polys
-polys<-read_sf(paste0(main_dir,"/ind_polys_R1.gpkg"))%>%filter(siteID == "FRA_BAR2")
-write_sf(polys,paste0(main_dir,"/ind_polys_R1.gpkg"))
+write_sf(ind_pols,paste0(main_dir,"/ind_polys_R1.gpkg"))

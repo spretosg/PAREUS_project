@@ -28,7 +28,7 @@ bq_auth(
 
 cred_path<-paste0("docs/",project_id,"_key.json")
 gcs_auth(cred_path)
-bucket<-paste0(id,"_geopros_",dev)
+bucket<-paste0(project_id,"_geopros_",dev)
 gcs_global_bucket(bucket)
 
 con_admin<-data.frame(
@@ -82,6 +82,7 @@ if(is.null(list.files(out_master_path))){
 
 ## download all raster:
 pattern<-paste0(stud_id,"/3_ind_R1")
+
 
 objects <- gcs_list_objects(prefix = pattern)
 # Create local folder to store the files

@@ -4,7 +4,7 @@ library(sf)
 library(dplyr)
 library(ppcor)
 
-stud_id<-"FRA_BAR2"
+stud_id<-"FRL04"
 main_dir<-paste0("P:/312204_pareus/WP2/T2.2/PGIS_ES_mapping/",stud_id,"/raw_data_backup")
 
 out_dir<-"P:/312204_pareus/WP4/cost_raster_es"
@@ -83,3 +83,91 @@ plot(c)
 #write raster
 terra::writeRaster(c,paste0(out_dir,"/",stud_id,"_cost_raster_es.tif"),overwrite=T)
 
+
+
+### cost based on policy
+pol_imp_path<-paste0("P:/312204_pareus/WP3/pol_impact_lulc/",stud_id)
+
+files <- list.files(
+  pol_imp_path,
+  pattern = "\\.tif$",
+  full.names = TRUE
+)
+
+impacts <- rast(files)
+
+npol <- nlyr(impacts)
+
+# store Cp_n rasters
+cp_list <- vector("list", npol)
+
+# coherence
+S <- read.csv(paste0("P:/312204_pareus/WP3/pol_coherence/",stud_id,".csv"),
+              sep = ";",
+              row.names = 1,
+              check.names = FALSE)
+
+S <- as.matrix(S)
+S[S == ""] <- NA
+
+S <- apply(S, c(1, 2), function(x) {
+  as.numeric(gsub(",", ".", x))
+})
+
+rn <- rownames(S)
+cn <- colnames(S)
+
+S[S == ""] <- NA
+
+S <- matrix(
+  as.numeric(gsub(",", ".", S)),
+  nrow = nrow(S),
+  dimnames = list(rn, cn)
+)
+
+for(i in 1:nrow(S)){
+  for(j in 1:ncol(S)){
+    if(is.na(S[i,j]) && !is.na(S[j,i])){
+      S[i,j] <- S[j,i]
+    }
+  }
+}
+
+diag(S) <- 3
+
+S <- S[names(impacts), names(impacts)]
+all(rownames(S) == names(impacts))
+
+npol <- nlyr(impacts)
+
+cp_list <- vector("list", npol)
+
+for (n in 1:npol) {
+  
+  cp_n <- impacts[[n]] * 0
+  
+  for (m in 1:npol) {
+    
+    if (m == n) next
+    
+    #costs - more trade off between more important aspects = higher values max 2 whereas synergies = 0
+    cp_n <- cp_n +
+      (1 - S[n,m]/3) *
+      impacts[[n]] *
+      impacts[[m]]
+    
+  }
+  
+  names(cp_n) <- names(impacts)[n]
+  cp_list[[n]] <- cp_n
+}
+
+Cp_n <- rast(cp_list)
+
+
+Cp <- sum(Cp_n)
+# normalized
+norm_term<-npol*(npol-1)
+Cp_norm<-Cp/norm_term
+
+writeRaster(Cp_norm,paste0("P:/312204_pareus/WP4/cost_raster_policy/",stud_id,"_cost_pol.tif"))

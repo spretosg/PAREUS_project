@@ -7,20 +7,20 @@ library(dplyr)
 library(gdistance)
 
 main_dir<-"P:/312204_pareus/"
-siteID<-"SK021"
+siteID<-"FRL04"
 gap<-read.csv(paste0("WP4/2_output/01_PA_analysis/",siteID,"_gap_analysis.csv"))
 
-stud_area<-read_sf(paste0(main_dir,"WP2/T2.2/PGIS_ES_mapping/",siteID,"/raw_data_backup/stud_site.gpkg"))
-stud_area<-stud_area%>%filter(siteID=="SK021")
+stud_area<-read_sf(paste0(main_dir,"WP2/T2.2/PGIS_ES_mapping/",siteID,"/raw_data_backup/study_site.gpkg"))
+stud_area<-stud_area%>%filter(siteID=="FRL04")
 
 pu<-st_read(paste0("WP4/2_output/02_optim/",siteID,"_input_final_grid.json"))
 pu$ID<-c(1:nrow(pu))
 pu$area<-as.numeric(st_area(pu))
 
 pu<-pu%>%mutate(lock_in = case_when(
-  is.na(max_IUCN_class) ~  FALSE,
-  max_IUCN_class>5 ~ TRUE,
-  max_IUCN_class<6 ~ FALSE
+  is.na(class) ~  FALSE,
+  class>5 ~ TRUE,
+  class<6 ~ FALSE
 ))
 
 
@@ -38,7 +38,7 @@ pu_wat<-pu%>%filter(sampled_habitat==5)
 
 # ---- single LULC optim ----
 p_for <-
-  prioritizr::problem(pu_for, c("sampled_reg_scaled","sampled_condition_scaled"), cost_column = c("sampled_cost_scaled")) %>%
+  prioritizr::problem(pu_for, c("sampled_reg_scaled","sampled_condition_scaled","inv_dist"), cost_column = c("sampled_cost_pol")) %>%
   add_min_set_objective() %>%
   add_boundary_penalties(penalty = 0.0005) %>%
   #add_neighbor_constraints(k = 5) %>%
@@ -62,7 +62,7 @@ add_core_pa_for<-forest%>%filter(solution_1==1)
 #### WATER ####
 
 p_wat <-
-  problem(pu_wat, c("sampled_reg","sampled_condition","inv_dist"), cost_column = "sampled_cost") %>%
+  problem(pu_wat, c("sampled_reg","sampled_condition","inv_dist"), cost_column = "sampled_cost_pol") %>%
   add_min_set_objective() %>%
   add_boundary_penalties(penalty = 0.0005) %>% # spatially clump planning units togethe
   #add_neighbor_constraints(k = 3) %>%
@@ -80,7 +80,7 @@ plot(
 add_core_pa_wat<-wat%>%filter(solution_1==1)
 
 p_wetl <-
-  problem(pu_wetl, c("sampled_reg","sampled_condition","inv_dist"), cost_column = "sampled_cost") %>%
+  problem(pu_wetl, c("sampled_reg","sampled_condition","inv_dist"), cost_column = "sampled_cost_pol") %>%
   add_min_set_objective() %>%
   add_boundary_penalties(penalty = 0.0005) %>%
   #add_neighbor_constraints(k = 3) %>%
@@ -152,7 +152,7 @@ stats_lulc_optim<-pu%>%filter(core_pa_lulc!="other" & core_pa_lulc!="existing co
 
 
 
-p_box <- ggplot(pu, aes(x = core_pa_lulc, y = LULC_class, fill = core_pa_lulc)) +
+p_box <- ggplot(pu, aes(x = core_pa_lulc, y = sampled_habitat, fill = core_pa_lulc)) +
   geom_boxplot() +
   scale_fill_manual(values = cols, name = NULL, na.translate = FALSE) +
   theme_minimal() +

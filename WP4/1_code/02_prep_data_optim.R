@@ -10,21 +10,24 @@ source("WP4/1_code/wp4_functions_utils.R")
 
 
 main_dir<-"P:/312204_pareus/"
-siteID<-"FRA_BAR2"
+siteID<-"FRL04"
 
 ## read grid from 01_pa_status.R
 grid<-st_read(paste0("WP4/2_output/02_optim/",siteID,"_input_grid.json"))
 target_crs<-st_crs(grid)$wkt
 
 ## read cost based on es
-cost<-terra::rast(paste0(main_dir,"WP4/cost_raster_es/",siteID,"_cost_raster_es.tif"))
+cost_es<-terra::rast(paste0(main_dir,"WP4/cost_raster_es/",siteID,"_cost_raster_es.tif"))
+cost_policy<-terra::rast(paste0(main_dir,"WP4/cost_raster_policy/",siteID,"_cost_pol.tif"))
 
 #read all es_make mean es as features 1
 es_raster_files <- list.files(paste0(main_dir,"WP2/T2.2/PGIS_ES_mapping/",siteID,"/raw_data_backup/4_mean_R1"),pattern = "\\.tif$", full.names = TRUE)
 # 2. Read all rasters
 es_raster <- terra::rast(es_raster_files)
 
-grand_mean_es<-mean(es_raster)
+
+#is the AHP and uncertainty weighted grand mean of all ES across all participants
+grand_mean_es<-terra::rast(paste0(main_dir,"WP2/T2.2/PGIS_ES_mapping/",siteID,"/es_weight_mean.tif"))
 #prov es mean
 mean_prov <- mean(es_raster[[c(3, 6, 10, 11)]])
 #cult es mean
@@ -50,7 +53,8 @@ pop30<-terra::rast(pop30)
 
 
 ## transform and resample rasters
-cost <- project(cost, target_crs)
+cost_es <- project(cost_es, target_crs)
+cost_policy <- project(cost_policy, target_crs)
 grand_mean_es <- project(grand_mean_es, target_crs)
 mean_cult <- project(mean_cult, target_crs)
 mean_reg <- project(mean_reg, target_crs)
@@ -63,8 +67,6 @@ pop30 <-project(pop30, target_crs)
 
 ## existing PA
 
-
-
 # 5. Sample mean value from each raster layer into the grid cells
 grid$sampled_es <- terra::extract(grand_mean_es, grid, fun = mean, na.rm = TRUE)[,2]
 grid$sampled_cult <- terra::extract(mean_cult, grid, fun = mean, na.rm = TRUE)[,2]
@@ -72,7 +74,8 @@ grid$sampled_prov <- terra::extract(mean_prov, grid, fun = mean, na.rm = TRUE)[,
 grid$sampled_reg <- terra::extract(mean_reg, grid, fun = mean, na.rm = TRUE)[,2]
 grid$sampled_pop25 <- terra::extract(pop25, grid, fun = mean, na.rm = TRUE)[,2]
 grid$sampled_pop30 <- terra::extract(pop30, grid, fun = mean, na.rm = TRUE)[,2]
-grid$sampled_cost <- terra::extract(cost, grid, fun = mean, na.rm = TRUE)[,2]
+grid$sampled_cost_es <- terra::extract(cost_es, grid, fun = mean, na.rm = TRUE)[,2]
+grid$sampled_cost_pol <- terra::extract(cost_policy, grid, fun = mean, na.rm = TRUE)[,2]
 grid$sampled_condition<- terra::extract(es_cond, grid, fun = mean, na.rm = TRUE)[,2]
 
 
@@ -89,13 +92,13 @@ grid<-rbind(out,pa_core)
 
 
 grid_clean <- grid %>%
-  filter(!if_any(all_of(c("sampled_es","sampled_cult","sampled_prov","sampled_reg","sampled_cost","sampled_condition","sampled_habitat")), ~ is.na(.) | is.nan(.)))
+  filter(!if_any(all_of(c("sampled_es","sampled_cult","sampled_prov","sampled_reg","sampled_cost_es","sampled_cost_pol","sampled_condition","sampled_habitat")), ~ is.na(.) | is.nan(.)))
 
 
 
 grid_clean<- zero_one_scale(
   grid_clean,
-  cols = c("sampled_pop25", "sampled_pop30", "sampled_es","sampled_cult","sampled_prov","sampled_reg","sampled_cost","sampled_condition","min_distance")
+  cols = c("sampled_pop25", "sampled_pop30", "sampled_es","sampled_cult","sampled_prov","sampled_reg","sampled_cost_es","sampled_condition","min_distance")
 )
 
 
