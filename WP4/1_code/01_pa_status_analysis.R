@@ -8,15 +8,15 @@ library(tidyr)
 
 # siteID<-"FRL04"
 #siteID<-"SK021"
-siteID<-"SK021"
+siteID<-"FRL04"
 target_core_prot_fraction <-0.1 #how much of each biome should be protected strictly
 main_dir<-"P:/312204_pareus/"
 
 #inputs
 
 ## stud_area 
-stud_area<-read_sf(paste0(main_dir,"WP2/T2.2/PGIS_ES_mapping/",siteID,"/raw_data_backup/stud_site.gpkg"))
-stud_area<-stud_area%>%filter(siteID=="SK021")
+stud_area<-read_sf(paste0(main_dir,"WP2/T2.2/PGIS_ES_mapping/",siteID,"/raw_data_backup/study_site.gpkg"))
+stud_area<-stud_area%>%filter(siteID=="FRL04")
 target_crs <- 2154 #adjust this for the area
 stud_area<-st_transform(stud_area,target_crs)
 total_area<-st_area(stud_area)
@@ -52,7 +52,7 @@ grid<-grid%>%filter(!is.na(sampled_habitat))
 lulc_stats<-grid%>%group_by(sampled_habitat)%>%summarise(area_km2=sum(as.numeric(area))/10^6)
 
 ## PA
-PA<-st_read(paste0(main_dir,"WP4/pa_existing/WDPA_SK021.shp"))
+PA<-st_read(paste0(main_dir,"WP4/pa_existing/WDPA_FRL04.shp"))
 PA<-st_transform(PA,st_crs(target_crs))
 PA <- st_intersection(PA, stud_area)
 PA<-st_make_valid(PA)

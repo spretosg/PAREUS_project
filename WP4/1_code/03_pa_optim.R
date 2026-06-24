@@ -29,6 +29,10 @@ pu<-pu%>%mutate(inv_dist = case_when(
   min_distance_scaled>0 ~ 1/min_distance_scaled
 ))
 
+# remove border patches:
+pu$area<-pu$area/10^6
+pu<-pu%>%filter(area >= 0.48713)
+
 gap_all<-0.1-sum(gap$area_km2)/sum(gap$tot_habitat_area)
 
 # make subsets for forest, wetlands and water
@@ -37,15 +41,37 @@ pu_wetl<-pu%>%filter(sampled_habitat==4)
 pu_wat<-pu%>%filter(sampled_habitat==5)
 
 # ---- single LULC optim ----
-p_for <-
-  prioritizr::problem(pu_for, c("sampled_reg_scaled","sampled_condition_scaled","inv_dist"), cost_column = c("sampled_cost_pol")) %>%
-  add_min_set_objective() %>%
-  add_boundary_penalties(penalty = 0.0005) %>%
-  #add_neighbor_constraints(k = 5) %>%
-  add_relative_targets(gap[gap$sampled_habitat == 3, ]$rel_gap) %>% # target = existing plus new = 10%
-  #add_absolute_targets(82)%>%
-  add_locked_out_constraints("lock_in") %>%
+#standardize within ecosystem
+pu_for$inv_cost_pol<-1/pu_for$sampled_cost_pol
+pu_for$reg_sc  <- pu_for$sampled_reg / max(pu_for$sampled_reg )
+pu_for$cond_sc <- pu_for$sampled_condition  / max(pu_for$sampled_condition)
+pu_for$conn_sc <- pu_for$inv_dist / max(pu_for$inv_dist )
+pu_for$cost_sc <- pu_for$inv_cost_pol / max(pu_for$inv_cost_pol)
+
+
+area_budget <- gap[gap$sampled_habitat == 3, ]$rel_gap * sum(pu_for$area)
+# optimization problem
+p_for <- problem(
+  pu_for,
+  features = c("reg_sc", "cond_sc", "conn_sc", "cost_sc"),
+  cost_column = "area" # Cost is set to area to enforce the area budget
+) %>%
+  # Maximizes feature values strictly within your 30% area budget
+  add_max_utility_objective(budget = area_budget) %>%
+  add_boundary_penalties(penalty = 0.0005) %>% 
+  
+  # Ensures planning units are either completely selected (1) or not (0)
   add_binary_decisions()
+
+# p_for <-
+#   prioritizr::problem(pu_for, c("sampled_reg_scaled","sampled_condition_scaled","inv_dist"), cost_column = c("sampled_cost_pol")) %>%
+#   add_min_set_objective() %>%
+#   add_boundary_penalties(penalty = 0.0005) %>%
+#   #add_neighbor_constraints(k = 5) %>%
+#   add_relative_targets(gap[gap$sampled_habitat == 3, ]$rel_gap) %>% # target = existing plus new = 10%
+#   #add_absolute_targets(82)%>%
+#   add_locked_out_constraints("lock_in") %>%
+#   add_binary_decisions()
 
 # solve problem
 forest <- solve(p_for)
@@ -61,16 +87,39 @@ add_core_pa_for<-forest%>%filter(solution_1==1)
 
 #### WATER ####
 
-p_wat <-
-  problem(pu_wat, c("sampled_reg","sampled_condition","inv_dist"), cost_column = "sampled_cost_pol") %>%
-  add_min_set_objective() %>%
-  add_boundary_penalties(penalty = 0.0005) %>% # spatially clump planning units togethe
-  #add_neighbor_constraints(k = 3) %>%
-  add_relative_targets(gap[gap$sampled_habitat == 5, ]$rel_gap) %>%
-  #add_relative_targets(0.1) %>%
-  #add_absolute_targets(40)%>%
-  #add_locked_out_constraints("lock_in") %>%
+pu_wat$inv_cost_pol<-1/pu_wat$sampled_cost_pol
+pu_wat$reg_sc  <- pu_wat$sampled_reg / max(pu_wat$sampled_reg )
+pu_wat$cond_sc <- pu_wat$sampled_condition  / max(pu_wat$sampled_condition)
+pu_wat$conn_sc <- pu_wat$inv_dist / max(pu_wat$inv_dist )
+pu_wat$cost_sc <- pu_wat$inv_cost_pol / max(pu_wat$inv_cost_pol)
+
+
+area_budget <- gap[gap$sampled_habitat == 5, ]$rel_gap * sum(pu_wat$area)
+# optimization problem
+p_wat <- problem(
+  pu_wat,
+  features = c("reg_sc", "cond_sc", "conn_sc", "cost_sc"),
+  cost_column = "area" # Cost is set to area to enforce the area budget
+) %>%
+  # Maximizes feature values strictly within your 30% area budget
+  add_max_utility_objective(budget = area_budget) %>%
+  add_boundary_penalties(penalty = 0.0005) %>% 
+  
+  # Ensures planning units are either completely selected (1) or not (0)
   add_binary_decisions()
+
+
+
+# p_wat <-
+#   problem(pu_wat, c("sampled_reg","sampled_condition","inv_dist"), cost_column = "sampled_cost_pol") %>%
+#   add_min_set_objective() %>%
+#   add_boundary_penalties(penalty = 0.0005) %>% # spatially clump planning units togethe
+#   #add_neighbor_constraints(k = 3) %>%
+#   add_relative_targets(gap[gap$sampled_habitat == 5, ]$rel_gap) %>%
+#   #add_relative_targets(0.1) %>%
+#   #add_absolute_targets(40)%>%
+#   #add_locked_out_constraints("lock_in") %>%
+#   add_binary_decisions()
 
 wat <- solve(p_wat)
 plot(
@@ -79,21 +128,50 @@ plot(
 )
 add_core_pa_wat<-wat%>%filter(solution_1==1)
 
-p_wetl <-
-  problem(pu_wetl, c("sampled_reg","sampled_condition","inv_dist"), cost_column = "sampled_cost_pol") %>%
-  add_min_set_objective() %>%
-  add_boundary_penalties(penalty = 0.0005) %>%
-  #add_neighbor_constraints(k = 3) %>%
-  add_relative_targets(gap[gap$sampled_habitat == 4, ]$rel_gap) %>%
-  #add_absolute_targets(40)%>%
+
+
+pu_wetl$inv_cost_pol<-1/pu_wetl$sampled_cost_pol
+pu_wetl$reg_sc  <- pu_wetl$sampled_reg / max(pu_wetl$sampled_reg )
+pu_wetl$cond_sc <- pu_wetl$sampled_condition  / max(pu_wetl$sampled_condition)
+pu_wetl$conn_sc <- pu_wetl$inv_dist / max(pu_wetl$inv_dist )
+pu_wetl$cost_sc <- pu_wetl$inv_cost_pol / max(pu_wetl$inv_cost_pol)
+
+
+area_budget <- gap[gap$sampled_habitat == 4, ]$rel_gap * sum(pu_wetl$area)
+
+
+# 2. Build the optimization problem
+p_wetl <- problem(
+  pu_wetl,
+  features = c("reg_sc", "cond_sc", "conn_sc", "cost_sc"),
+  cost_column = "area" # Cost is set to area to enforce the area budget
+) %>%
+  # Maximizes feature values strictly within your 30% area budget
+  add_max_utility_objective(budget = area_budget) %>%
+  add_boundary_penalties(penalty = 0.0005) %>% 
   
-  #add_locked_out_constraints("lock_in") %>%
+  # Ensures planning units are either completely selected (1) or not (0)
   add_binary_decisions()
+
+# p_wetl <-
+#   problem(pu_wetl, c("sampled_reg","sampled_condition",""), cost_column = "sampled_cost_es") %>%
+#   add_min_set_objective() %>%
+#   add_boundary_penalties(penalty = 0.0005) %>%
+#   #add_neighbor_constraints(k = 3) %>%
+#   add_relative_targets(gap[gap$sampled_habitat == 4, ]$rel_gap) %>%
+#   #add_absolute_targets(40)%>%
+#   
+#   #add_locked_out_constraints("lock_in") %>%
+#   add_binary_decisions()
 wetl <- solve(p_wetl)
 plot(
   st_as_sf(wetl[, "solution_1"]), main = "Prioritization",
   pal = c("grey90", "darkgreen")
 )
+
+# plot(
+#       st_as_sf(wetl[, "area"]), main = "Prioritization"
+#    )
 
 add_core_pa_wetl<-wetl%>%filter(solution_1==1)
 
@@ -144,7 +222,7 @@ map_lulc <- ggplot(pu) +
 ggsave(paste0("WP4/2_output/02_optim/",siteID,"_pa_optim.png"), plot = map_lulc, width = 18, height = 10, dpi = 300)
 
 
-stats_lulc_optim<-pu%>%filter(core_pa_lulc!="other" & core_pa_lulc!="existing core pa")%>%group_by(sampled_habitat,core_pa_lulc)%>%
+stats_lulc_optim<-pu%>%filter(core_pa_lulc!="other" )%>%group_by(sampled_habitat,core_pa_lulc)%>%
   summarise(ec_mean = mean(sampled_condition_scaled),
             ec_sd = sd(sampled_condition_scaled),
             km2 = sum(area)/10^6)%>%st_drop_geometry()

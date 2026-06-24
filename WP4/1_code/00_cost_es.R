@@ -142,6 +142,7 @@ npol <- nlyr(impacts)
 
 cp_list <- vector("list", npol)
 
+#### V.1 old?
 for (n in 1:npol) {
   
   cp_n <- impacts[[n]] * 0
@@ -169,5 +170,28 @@ Cp <- sum(Cp_n)
 # normalized
 norm_term<-npol*(npol-1)
 Cp_norm<-Cp/norm_term
-
+plot(Cp_norm)
 writeRaster(Cp_norm,paste0("P:/312204_pareus/WP4/cost_raster_policy/",stud_id,"_cost_pol.tif"))
+
+
+
+V.2###
+
+C <- impacts[[1]] * 0
+
+for (n in 1:(npol - 1)) {
+  
+  for (m in (n + 1):npol) {
+    
+    syn <- (S[n,m] + 3) / 6
+    
+    imp <- (abs(impacts[[n]]) +
+              abs(impacts[[m]])) / 2
+    
+    C <- C + (1 - syn) * (1 - imp)
+  }
+}
+
+
+writeRaster(C,paste0("P:/312204_pareus/WP4/cost_raster_policy/",stud_id,"_cost_pol_new.tif"))
+

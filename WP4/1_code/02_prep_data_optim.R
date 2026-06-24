@@ -18,7 +18,7 @@ target_crs<-st_crs(grid)$wkt
 
 ## read cost based on es
 cost_es<-terra::rast(paste0(main_dir,"WP4/cost_raster_es/",siteID,"_cost_raster_es.tif"))
-cost_policy<-terra::rast(paste0(main_dir,"WP4/cost_raster_policy/",siteID,"_cost_pol.tif"))
+cost_policy<-terra::rast(paste0(main_dir,"WP4/cost_raster_policy/",siteID,"_cost_pol_new.tif"))
 
 #read all es_make mean es as features 1
 es_raster_files <- list.files(paste0(main_dir,"WP2/T2.2/PGIS_ES_mapping/",siteID,"/raw_data_backup/4_mean_R1"),pattern = "\\.tif$", full.names = TRUE)
