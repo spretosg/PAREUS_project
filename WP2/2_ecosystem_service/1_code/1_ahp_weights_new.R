@@ -4,7 +4,7 @@ library(tidyverse)
 library(dplyr)
 
 
-stud_id<-"FRA_BAR2"
+stud_id<-"SK021"
 main_path<-paste0("P:/312204_pareus/WP2/T2.2/PGIS_ES_mapping/",stud_id,"/raw_data_backup")
 
 es_pair<-read.csv(paste0(main_path,"/es_pair.csv"))%>%filter(siteID == stud_id)
@@ -107,8 +107,8 @@ df_cr <- data.frame(CR = cr_vec)
 
 
 
-ind_prov<-3
-ind_cult<-4
+ind_prov<-4
+ind_cult<-3
 ind_all<-1
 ind_reg<-2
 

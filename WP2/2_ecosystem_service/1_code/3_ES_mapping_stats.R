@@ -65,3 +65,8 @@ ggplot(raster_all, aes(x = x, y = y, fill = ES_capacity)) +
 
 # variable importance
 
+
+
+
+
+
