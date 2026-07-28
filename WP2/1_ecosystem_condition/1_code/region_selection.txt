@@ -1,0 +1,341 @@
+// Module for Selecting Administrative Boundaries 
+
+var exports = {};  // Define exports object to hold all public functions and variables 
+
+ 
+
+//AltSource for administrative boundaries - More precise than FAO/GAUL - Here limited to Europe countries 
+
+var admin0 = ee.FeatureCollection("projects/earthengine-legacy/assets/projects/sat-io/open-datasets/field-maps/OSM_adm0_polygons").filter(ee.Filter.eq('region1_nm', 'Europe')); 
+
+var admin1 = ee.FeatureCollection("projects/sat-io/open-datasets/field-maps/edge-matched-open/adm1_polygons").filter(ee.Filter.eq('region1_nm', 'Europe')); 
+
+var admin2 = ee.FeatureCollection("projects/sat-io/open-datasets/field-maps/edge-matched-open/adm2_polygons").filter(ee.Filter.eq('region1_nm', 'Europe')); 
+
+ 
+
+ 
+
+// Administrative boundaries FeatureCollections 
+
+//var admin0 = ee.FeatureCollection("FAO/GAUL/2015/level0"); 
+
+//var admin1 = ee.FeatureCollection("FAO/GAUL/2015/level1"); 
+
+//var admin2 = ee.FeatureCollection("FAO/GAUL/2015/level2"); 
+
+ 
+
+// Placeholder for the callback function 
+
+var selectionCallback; 
+
+ 
+
+// Placeholder for selectedFeatureCollection 
+
+var selectedFeatureCollection; 
+
+ 
+
+// Function to initialize and display the selection UI 
+
+exports.initSelectionUI = function() { 
+
+  var mainPanel = ui.Panel({style: {width: '300px'}}); 
+
+  ui.root.insert(0, mainPanel); 
+
+ 
+
+  var title = ui.Label('Select a Region', {fontWeight: 'bold', fontSize: '24px', margin: '10px 5px'}); 
+
+  mainPanel.add(title); 
+
+ 
+
+  // Dropdowns for each administrative level 
+
+  var admin0Select = ui.Select({placeholder: 'Loading countries...'}); 
+
+  var admin1Select = ui.Select({placeholder: 'Select a country first', disabled: true}); 
+
+  var admin2Select = ui.Select({placeholder: 'Select a region first', disabled: true}); 
+
+ 
+
+  // Panel for dropdowns 
+
+  var dropdownPanel = ui.Panel({ 
+
+    widgets: [admin0Select, admin1Select, admin2Select], 
+
+    style: {padding: '8px', border: '1px solid black'} 
+
+  }); 
+
+  mainPanel.add(dropdownPanel); 
+
+ 
+
+  // Confirmation button setup 
+
+  var confirmButton = ui.Button({ 
+
+      label: 'Confirm Selection', 
+
+      onClick: function() { 
+
+          // Function to be called when the confirmation button is clicked, now defined here to access the selects 
+
+          var selectedAdmin0 = admin0Select.getValue(); 
+
+          var selectedAdmin1 = admin1Select.getValue(); 
+
+          var selectedAdmin2 = admin2Select.getValue(); 
+
+ 
+
+          // Logic to set selectedFeatureCollection based on the most specific selection 
+
+          if (selectedAdmin2 && selectedAdmin2 !== 'No further subdivision' && selectedAdmin2 !== null) { 
+
+              selectedFeatureCollection = admin2.filter(ee.Filter.eq('adm2_name', selectedAdmin2)); 
+
+          } else if (selectedAdmin1 && selectedAdmin1 !== null) { 
+
+              selectedFeatureCollection = admin1.filter(ee.Filter.eq('adm1_name', selectedAdmin1)); 
+
+          } else if (selectedAdmin0 && selectedAdmin0 !== null) { 
+
+              selectedFeatureCollection = admin0.filter(ee.Filter.eq('adm0_name', selectedAdmin0)); 
+
+          } else { 
+
+              // Ensure there's a default or error handling if no selection is made 
+
+              selectedFeatureCollection = undefined; // Or set to a default feature collection 
+
+          } 
+
+           
+
+          // Trigger the callback with the selectedFeatureCollection 
+
+          if (typeof selectionCallback === 'function') { 
+
+              selectionCallback(selectedFeatureCollection); 
+
+          } 
+
+      }, 
+
+      disabled: true // Initially disabled 
+
+  }); 
+
+ 
+
+  mainPanel.add(confirmButton); 
+
+  // mainPanel.add(ui.Panel().add(ui.Label({value: 'Selection will appear here', style: {margin: '10px 5px'}}))); 
+
+ 
+
+  // Populate admin0 dropdown with countries 
+
+  admin2.aggregate_array('adm0_name').sort().getInfo(function(countryNames) { 
+
+  //  apply filter on Countrynames to remove duplicates 
+
+  var uniqueCountryNames = countryNames.filter(function(value, index, self) {  
+
+    return self.indexOf(value) === index; 
+
+  }); 
+
+    admin0Select.items().reset(uniqueCountryNames); 
+
+    admin0Select.setPlaceholder('Select a country'); 
+
+  }); 
+
+   
+
+  // Handlers for selection changes 
+
+  admin0Select.onChange(function(selectedCountry) { 
+
+    admin1Select.setDisabled(false).setValue(null); 
+
+    admin1Select.setPlaceholder('Loading...'); 
+
+    admin2Select.setValue(null); 
+
+    admin2Select.setDisabled(true); 
+
+    loadAdmin1(selectedCountry); 
+
+    confirmButton.setDisabled(false);  // Enable confirmation after Admin0 selection 
+
+  }); 
+
+ 
+
+  // Update the admin1Select onChange handler 
+
+  admin1Select.onChange(function(selectedRegion) { 
+
+    admin2Select.setDisabled(false).setValue(null); 
+
+    admin2Select.setPlaceholder('Loading...'); 
+
+    loadAdmin2(selectedRegion); 
+
+    confirmButton.setDisabled(false);  // Enable confirmation after Admin1 selection 
+
+  }); 
+
+ 
+
+  // The admin2Select onChange handler to enable confirmation after Admin2 selection 
+
+  admin2Select.onChange(function() { 
+
+    confirmButton.setDisabled(false); 
+
+  }); 
+
+ 
+
+  function loadAdmin1(countryName) { 
+
+    var regions = admin2.filter(ee.Filter.eq('adm0_name', countryName)) 
+
+        .aggregate_array('adm1_name').sort(); 
+
+         
+
+    regions.evaluate(function(RegionNames) { 
+
+        //  apply filter on RegionNames to remove duplicates 
+
+        var uniqueRegionNames = RegionNames.filter(function(value, index, self) {  
+
+            return self.indexOf(value) === index; 
+
+        }); 
+
+        admin1Select.items().reset(uniqueRegionNames); 
+
+        admin1Select.setPlaceholder('Select a region'); 
+
+    }); 
+
+  } 
+
+ 
+
+  function loadAdmin2(regionName) { 
+
+  var subRegions = admin2.filter(ee.Filter.eq('adm1_name', regionName)) 
+
+      .aggregate_array('adm2_name').sort(); 
+
+ 
+
+  subRegions.evaluate(function(subRegionNames) { 
+
+    // Directly reset and populate the dropdown since there are no duplicates 
+
+    admin2Select.items().reset(subRegionNames); 
+
+    admin2Select.setPlaceholder('Select a sub-region'); 
+
+    admin2Select.setDisabled(false); // Ensure dropdown is enabled 
+
+  }); 
+
+  } 
+
+ 
+
+ 
+
+}; 
+
+ 
+
+var selectedFeatureCollection; 
+
+ 
+
+ 
+
+// Function to be called when the confirmation button is clicked 
+
+function confirmSelection() { 
+
+    var selectedAdmin0 = admin0Select.getValue(); 
+
+    var selectedAdmin1 = admin1Select.getValue(); 
+
+    var selectedAdmin2 = admin2Select.getValue(); 
+
+ 
+
+    // Logic to set selectedFeatureCollection based on the most specific selection 
+
+    if (selectedAdmin2 && selectedAdmin2 !== 'No further subdivision' && selectedAdmin2 !== null) { 
+
+        selectedFeatureCollection = admin2.filter(ee.Filter.eq('adm2_name', selectedAdmin2)); 
+
+    } else if (selectedAdmin1 && selectedAdmin1 !== null) { 
+
+        selectedFeatureCollection = admin1.filter(ee.Filter.eq('adm1_name', selectedAdmin1)); 
+
+    } else if (selectedAdmin0 && selectedAdmin0 !== null) { 
+
+        selectedFeatureCollection = admin0.filter(ee.Filter.eq('adm0_name', selectedAdmin0)); 
+
+    } else { 
+
+        // Ensure there's a default or error handling if no selection is made 
+
+        selectedFeatureCollection = undefined; // Or set to a default feature collection 
+
+    } 
+
+     
+
+    // Trigger the callback with the selectedFeatureCollection 
+
+    if (typeof selectionCallback === 'function') { 
+
+        selectionCallback(getSelectedFeatureCollection()); 
+
+    } 
+
+} 
+
+ 
+
+// Export a function to set the callback 
+
+exports.setOnSelectionCallback = function(callback) { 
+
+    selectionCallback = callback; 
+
+}; 
+
+ 
+
+ 
+
+// Export the getter function 
+
+exports.getSelectedFeatureCollection = function() { 
+
+    return selectedFeatureCollection; 
+
+}; 
