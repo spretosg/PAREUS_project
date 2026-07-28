@@ -4,7 +4,7 @@ library(sf)
 library(dplyr)
 library(ppcor)
 
-stud_id<-"FRL04"
+stud_id<-"FRA_BAR2"
 main_dir<-paste0("P:/312204_pareus/WP2/T2.2/PGIS_ES_mapping/",stud_id,"/raw_data_backup")
 
 out_dir<-"P:/312204_pareus/WP4/cost_raster_es"
@@ -101,6 +101,8 @@ npol <- nlyr(impacts)
 # store Cp_n rasters
 cp_list <- vector("list", npol)
 
+
+
 # coherence
 S <- read.csv(paste0("P:/312204_pareus/WP3/pol_coherence/",stud_id,".csv"),
               sep = ";",
@@ -117,7 +119,6 @@ S <- apply(S, c(1, 2), function(x) {
 rn <- rownames(S)
 cn <- colnames(S)
 
-S[S == ""] <- NA
 
 S <- matrix(
   as.numeric(gsub(",", ".", S)),
@@ -133,7 +134,7 @@ for(i in 1:nrow(S)){
   }
 }
 
-diag(S) <- 3
+# diag(S) <- 0
 
 S <- S[names(impacts), names(impacts)]
 all(rownames(S) == names(impacts))
@@ -142,56 +143,20 @@ npol <- nlyr(impacts)
 
 cp_list <- vector("list", npol)
 
-#### V.1 old?
-for (n in 1:npol) {
-  
-  cp_n <- impacts[[n]] * 0
-  
-  for (m in 1:npol) {
-    
-    if (m == n) next
-    
-    #costs - more trade off between more important aspects = higher values max 2 whereas synergies = 0
-    cp_n <- cp_n +
-      (1 - S[n,m]/3) *
-      impacts[[n]] *
-      impacts[[m]]
-    
-  }
-  
-  names(cp_n) <- names(impacts)[n]
-  cp_list[[n]] <- cp_n
-}
 
-Cp_n <- rast(cp_list)
+# Correlation matrix between policy instruments
 
 
-Cp <- sum(Cp_n)
-# normalized
-norm_term<-npol*(npol-1)
-Cp_norm<-Cp/norm_term
-plot(Cp_norm)
-writeRaster(Cp_norm,paste0("P:/312204_pareus/WP4/cost_raster_policy/",stud_id,"_cost_pol.tif"))
+N <- nlyr(impacts)
 
+# Mean policy impact raster
+I_bar <- sum(impacts) / N
 
+# Mean off-diagonal correlation
+S_bar <- mean(S[row(S) != col(S)])
 
-V.2###
-
-C <- impacts[[1]] * 0
-
-for (n in 1:(npol - 1)) {
-  
-  for (m in (n + 1):npol) {
-    
-    syn <- (S[n,m] + 3) / 6
-    
-    imp <- (abs(impacts[[n]]) +
-              abs(impacts[[m]])) / 2
-    
-    C <- C + (1 - syn) * (1 - imp)
-  }
-}
-
-
-writeRaster(C,paste0("P:/312204_pareus/WP4/cost_raster_policy/",stud_id,"_cost_pol_new.tif"))
-
+# Cost raster
+cost <- 1 - I_bar / 2 + S_bar * (1 - I_bar) / 2
+plot(cost)
+out_dir<-"P:/312204_pareus/WP4/cost_raster_policy"
+terra::writeRaster(cost,paste0(out_dir,"/",stud_id,"_cost_raster_pol.tif"),overwrite=T)

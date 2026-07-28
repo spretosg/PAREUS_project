@@ -11,9 +11,13 @@ library(dplyr)
 library(ggplot2)
 library(dplyr)
 library(terra)
+library(SSDM)
+
 
 source("WP2/wp2_functions_utils.R")
 stud_id<-"FRL04"
+
+
 main_dir<-paste0("P:/312204_pareus/WP2/T2.2/PGIS_ES_mapping/",stud_id,"/raw_data_backup")
 eval_round<-"R1" #R2
 
@@ -21,10 +25,14 @@ eval_round<-"R1" #R2
 
 ## load and stack the predictor variables
 in_var <- list.files(paste0(main_dir,"/env_var"), full.names = TRUE)
-pred<-SSDM::load_var(path=paste0(main_dir,"/env_var"))
+pred<-SSDM::load_var(path=paste0(main_dir,"/2_env_var"), categorical = "lulc")
+
+
 
 # 2. Read all rasters
 rasters <- lapply(in_var, rast)
+
+
 
 
 ## read participants data
@@ -42,88 +50,9 @@ ind_pols <- ind_pols %>%
             by = c("esID", "userID"))
 
 users<-unique(ind_pols$userID)
-es<-unique(ind_pols$esID)
-#1. at es level
-#1.1 run a model with all users -- var imp
-#1.2. run a model with hold out for user 
-#
-#Sensitivity: modelling parameters, 
-# min_in_pts<-10
-# for(n in 1:length(es)){
-#   tmp_es<-es[n]
-#   polygon<-ind_pols%>%filter(esID == tmp_es)
-#   for (i in 1:nrow(polygon)) {
-#     A_tmp <- as.numeric(st_area(polygon[i,]))
-#     tmp_ratio<-A_tmp/A_roi
-#     tmp_pts<-round(all_back_pts*tmp_ratio,0)
-#     
-#     if(tmp_pts<=min_in_pts){
-#       tmp_pts<-min_in_pts
-#     }else{
-#       tmp_pts<-tmp_pts
-#     }
-#     # npts in this poly must be max_pts*tmp_ratio*es_value
-#     #+1 its 0-5 scale
-#     tmp_es_val<-((1+polygon[i,]$es_value)/5)
-#     tmp_pts = st_sample(polygon[i,], round(tmp_pts*tmp_es_val,0),type="random")
-#     tmp_pts<-st_as_sf(tmp_pts)
-#     tmp_pts$inside<-rep(1,nrow(tmp_pts))
-#     if(i==1){
-#       pts_in<-tmp_pts
-#     }else{
-#       pts_in<-rbind(pts_in,tmp_pts)
-#     }
-#     
-#   }
-#   
-#   weight_access <- as.numeric(as.numeric(mean(polygon$imp_acc))/5)
-#   pred_w<-raster::stack(pred$dem*1, pred$lulc*1, pred$int*1, pred$acc*weight_access)
-#   pts_in<-st_transform(pts_in,st_crs(pred))
-#   pts_in_sp <- as(pts_in, "Spatial")
-#   
-#   # 3. Extract raster values
-#   extracted_values <- raster::extract(pred_w, pts_in_sp)
-#   
-#   # 4. Combine extracted values with original points
-#   # If pred_w has multiple layers, extract returns a matrix
-#   if (is.matrix(extracted_values)) {
-#     colnames(extracted_values) <- names(pred_w)
-#     pts_in <- cbind(pts_in, extracted_values)
-#   } else {
-#     # Single layer case
-#     pts_in <- cbind(pts_in, raster_value = extracted_values)
-#   }
-#   
-#   # 5. Add coordinates
-#   pts_in <- cbind(pts_in, st_coordinates(pts_in))
-#   colnames(pts_in)[colnames(pts_in) %in% c("X", "Y")] <- c("lon", "lat")
-#   
-#   # 6. Convert to data frame and remove NAs
-#   pts <- st_drop_geometry(pts_in)
-#   pts <- na.omit(pts)
-#   pts <- pts %>% dplyr::select(lon, lat)
-#   
-#   #######################
-#   
-#   
-#   # pts <- do.call(rbind, st_geometry(pts_in)) %>% 
-#   #   as_tibble() %>% setNames(c("lon","lat"))
-#   pts$SPECIES<-rep("pres",nrow(pts))
-#   
-#   
-#   # Train model
-#   SDM <- SSDM::modelling(
-#     'RF', pts, 
-#     pred_w,
-#     Xcol = 'lon', Ycol = 'lat',
-#     cv = "holdout",
-#     cv.param = c(0.7, 2),
-#     final.fit.data = "all"
-#   )
-#   
-#   
-# }
+mapper<-read.csv(paste0(main_dir,"/mapper.csv"))%>%filter(siteID == stud_id & userID %in% users)
 
+es<-unique(ind_pols$esID)
 
 ### ---- helper fct
 make_presence_points <- function(polys, A_roi, all_back_pts, min_in_pts = 10) {
@@ -150,10 +79,6 @@ make_presence_points <- function(polys, A_roi, all_back_pts, min_in_pts = 10) {
   do.call(rbind, pts_list)
 }
 
-
-### ---- leave one out analysis
-library(SSDM)
-
 results_list <- list()
 varimp_list<-list()
 es_ids<-es[1]
@@ -164,8 +89,7 @@ for (es in es_ids) {
   
   pol_es <- ind_pols %>% filter(esID == es)
 
-  
-  # ---- FULL MODEL ----
+  # ---- FULL PTS ----
   pts_full <- make_presence_points(pol_es, A_roi, all_back_pts, min_in_pts = 10)
   pts_full <- st_transform(pts_full, st_crs(pred))
   pts_full_sp <- as(pts_full, "Spatial")
@@ -190,88 +114,235 @@ for (es in es_ids) {
   
 
   df_full$SPECIES <- "pres"
+
+  algos <- c("GLM", "RF", "GAM", "Maxent")
   
-  m_full <- SSDM::modelling("RF", df_full,
-                            pred_w, Xcol="lon", Ycol="lat",
-                            cv="holdout", cv.param=c(0.7,2),
-                            final.fit.data="all")
+  mods <- lapply(algos, function(a)
+    SSDM::modelling(
+      a,
+      df_full,
+      pred_w,
+      Xcol = "lon",
+      Ycol = "lat",
+      cv = "holdout",
+      cv.param = c(0.7, 2),
+      final.fit.data = "all"
+    )
+  )
+  
+  names(mods) <- algos
+  perf <- do.call(rbind,
+                  lapply(mods, function(x) x@evaluation)
+  )
+
+  imp_norm <- lapply(mods, function(m){
+    x <- m@variable.importance
+    x / sum(x)
+  })
+  
+  alg_stack <- list(
+    terra::rast(mods$GLM@projection),
+    terra::rast(mods$RF@projection),
+    terra::rast(mods$GAM@projection)
+    #terra::rast(mods$Maxent@projection)
+  )
+  names(alg_stack) <- c("GLM","RF","GAM")
+  
+  # algo_stack <- terra::rast(c(r_RF, r_GLM, r_GAM))
+  # 
+
+  terra::writeRaster(
+    algo_stack,
+    paste0(stud_id,"_", es, "_algoStack.tif"),
+    overwrite = TRUE
+  )
+  
+  
+  results_list[[as.character(es)]] <- user_scores
+  projection_results[[as.character(es)]] <- projection_list
+  
+  preds <- rast(projection_results[[as.character(es)]])
+  
+  names(preds) <- names(projection_results[[as.character(es)]])
+  # 
+  # mean_pred <- terra::app(preds, mean, na.rm = TRUE)
+  # sd_pred <- terra::app(preds, sd, na.rm = TRUE)
+  # cv_pred<-sd_pred/mean_pred
+  # 
+  # range_pred <- terra::app(preds, function(x)
+  #   max(x, na.rm=TRUE) - min(x, na.rm=TRUE))
+
+
+### user influence analysis
+
+
+  users_es <- unique(pol_es$userID)
+  
+  ## Full model ------------------------------------------------------------
+  
+  m_full <- SSDM::modelling(
+    "RF",
+    df_full,
+    pred_w,
+    Xcol = "lon",
+    Ycol = "lat",
+    cv = "holdout",
+    cv.param = c(0.7,2),
+    final.fit.data = "all"
+  )
   
   auc_full <- m_full@evaluation$AUC
-  varimp_es<-m_full@variable.importance
-  varimp_list[[as.character(es)]] <- varimp_es
+  varimp_full <- m_full@variable.importance
+  proj_full <- terra::rast(m_full@projection)
   
-  rf_pred_rast <- terra::rast(m_full@projection)
-  #write_modelled raster to drive
-  raster_out<-terra::writeRaster(rf_pred_rast,paste0(main_dir,"/4_mean_R1/",es,"_RF_all.tif"))
   
-  # ## compute corr between RF_all and mean
-  # mean_rast <- terra::rast(paste0(main_dir, "/4_mean_R1/", es, "_mean.tif"))
-  # 
-  # # Ensure same resolution, extent, CRS
-  # mean_rast <- terra::resample(mean_rast, rf_pred_rast)
-  # 
-  # # Extract values
-  # val_rf   <- terra::values(rf_pred_rast, mat = FALSE)
-  # val_mean <- terra::values(mean_rast, mat = FALSE)
-  # 
-  # # Remove missing pairs
-  # keep <- complete.cases(val_rf, val_mean)
-  # 
-  # corr_full <- cor(val_mean[keep], val_rf[keep])
-  # ---- USER REMOVAL ----
-  users_es <- unique(pol_es$userID)
+  
+  
+  
+  
+  ## Table to store results ------------------------------------------------
   
   user_scores <- data.frame(
     userID = users_es,
     AUC_full = auc_full,
     AUC_minusUser = NA,
-    delta_AUC = NA
+    delta_AUC = NA,
+    MeanDiff = NA,
+    RMSE = NA,
+    Corr = NA,
+    Delta_dem = NA,
+    Delta_lulc = NA,
+    Delta_int = NA,
+    Delta_acc = NA
   )
   
+  ## Store prediction maps if desired
+  projection_list <- list()
+  projection_results<-list()
+  
+  ## Leave-one-user-out ----------------------------------------------------
+  
   for (u in users_es) {
-    message("   Removing user: ", u)
     
-    pol_minus <- pol_es %>% filter(userID != u)
-
+    message("Removing user: ", u)
+    
+    pol_minus <- pol_es %>%
+      filter(userID != u)
+    
     pts_minus <- make_presence_points(pol_minus, A_roi, all_back_pts)
     pts_minus <- st_transform(pts_minus, st_crs(pred))
     pts_minus_sp <- as(pts_minus, "Spatial")
     
-    extracted2 <- extract(pred_w, pts_minus_sp)
+    extracted2 <- raster::extract(pred_w, pts_minus_sp)
+    
     df_minus <- cbind(pts_minus, extracted2)
     df_minus <- cbind(df_minus, st_coordinates(df_minus))
-    colnames(df_minus)[colnames(df_minus) %in% c("X", "Y")] <- c("lon", "lat")
+    colnames(df_minus)[colnames(df_minus) %in% c("X","Y")] <- c("lon","lat")
     
-    # 6. Convert to data frame and remove NAs
     df_minus <- st_drop_geometry(df_minus)
     df_minus <- na.omit(df_minus)
-    df_minus <- df_minus %>% dplyr::select(lon, lat)
-
+    df_minus <- df_minus[,c("lon","lat")]
+    
     df_minus$SPECIES <- "pres"
     
-    m_minus <- SSDM::modelling("RF", df_minus,
-                               pred_w, Xcol="lon", Ycol="lat",
-                               cv="holdout", cv.param=c(0.7,2),
-                               final.fit.data="all")
-    varimp_user<-m_minus@variable.importance
+    ## Fit model
+    m_minus <- SSDM::modelling(
+      "RF",
+      df_minus,
+      pred_w,
+      Xcol="lon",
+      Ycol="lat",
+      cv="holdout",
+      cv.param=c(0.7,2),
+      final.fit.data="all"
+    )
     
+    ## Evaluation
     auc_minus <- m_minus@evaluation$AUC
     
-    user_scores[user_scores$userID == u, "AUC_minusUser"] <- auc_minus
-    user_scores[user_scores$userID == u, "delta_AUC"]      <- auc_full - auc_minus
-    user_scores[user_scores$userID == u, "varimp_dem"]  <- varimp_user[1]
-    user_scores[user_scores$userID == u, "varimp_lulc"]  <- varimp_user[2]
-    user_scores[user_scores$userID == u, "varimp_int"]  <- varimp_user[3]
-    user_scores[user_scores$userID == u, "varimp_acc"]  <- varimp_user[4]
+    ## Variable importance
+    varimp_minus <- m_minus@variable.importance
+    
+    ## Prediction map
+    proj_minus <- terra::rast(m_minus@projection)
+    
+    projection_list[[as.character(u)]] <- proj_minus
+    
+    ## Spatial difference
+    diff <- proj_full - proj_minus
+    
+    mean_diff <- terra::global(abs(diff), "mean", na.rm=TRUE)[1,1]
+    
+    rmse <- sqrt(
+      terra::global(diff^2, "mean", na.rm=TRUE)[1,1]
+    )
+    
+    vals <- na.omit(cbind(
+      terra::values(proj_full),
+      terra::values(proj_minus)
+    ))
+    
+    corr <- cor(vals[,1], vals[,2])
+    
+    ## Save
+    
+    user_scores[user_scores$userID==u,"AUC_minusUser"] <- auc_minus
+    user_scores[user_scores$userID==u,"delta_AUC"] <- auc_full-auc_minus
+    
+    user_scores[user_scores$userID==u,"MeanDiff"] <- mean_diff
+    user_scores[user_scores$userID==u,"RMSE"] <- rmse
+    user_scores[user_scores$userID==u,"Corr"] <- corr
+    
+    user_scores[user_scores$userID==u,"Delta_dem"] <-
+      varimp_full[1]-varimp_minus[1]
+    
+    user_scores[user_scores$userID==u,"Delta_lulc"] <-
+      varimp_full[2]-varimp_minus[2]
+    
+    user_scores[user_scores$userID==u,"Delta_int"] <-
+      varimp_full[3]-varimp_minus[3]
+    
+    user_scores[user_scores$userID==u,"Delta_acc"] <-
+      varimp_full[4]-varimp_minus[4]
+    
   }
   
   results_list[[as.character(es)]] <- user_scores
-}
-print(Sys.time()-t0)
-# weight predictors
+  projection_results[[as.character(es)]] <- projection_list
+  user_stack <- terra::rast(projection_list)
+  
+  names(user_stack) <- names(projection_list)
+  
+  terra::writeRaster(
+    user_stack,
+    filename = file.path(
+      out_dir,
+      paste0(stud_id,"_", es, "_userStack.tif")
+    ),
+    overwrite = TRUE
+  )
+  
 
-# pred_w<-stack(pred$dem*1, pred$eii*1, pred$acc*as.numeric(input$imp_acc))
+  
+  preds <- rast(projection_results[[as.character(es)]])
+  
+  names(preds) <- names(projection_results[[as.character(es)]])
+  
+  # mean_pred <- app(preds, mean, na.rm=TRUE)
+  # sd_pred <- app(preds, sd, na.rm=TRUE)
+  # 
+  # 
+  # range_pred <- app(preds,
+  #                   function(x)
+  #                     max(x,na.rm=TRUE)-min(x,na.rm=TRUE))
+  # 
+  # 
+  # uncertainty <- app(preds,
+  #                    function(x)
+  #                      sd(x)/mean(x))
+  # uncertainty <- app(preds,
+  #                    function(x)
+  #                      quantile(x,0.75,na.rm=T)-quantile(x, 0.25, na.rm=T))
 
-
-
+} 
 

@@ -36,10 +36,10 @@ lulc<-project(lulc,crs(es_cond))
 lulc <- resample(lulc, es_cond, method = "near")
 
 ## for each lulc type attach a factor multiplying the EC
-## higher values == easier to move through area
+## higher values == easier to move through area general assumptions
 factors <- data.frame(
   class = c(1, 2, 3, 4, 5),
-  factor = c(0.1, 0.5, 0.8, 1,1)
+  factor = c(0.1, 0.5, 1, 0.7,0.7)
 )
 
 factor_raster <- classify(

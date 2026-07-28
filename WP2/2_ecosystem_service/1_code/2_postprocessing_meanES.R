@@ -6,7 +6,7 @@ library(dplyr)
 library(spatstat.geom)
 library(spatstat.model)
 source("WP2/wp2_functions_utils.R")
-stud_id<-"FRL04"
+stud_id<-"FRA_BAR2"
 main_dir<-paste0("P:/312204_pareus/WP2/T2.2/PGIS_ES_mapping/",stud_id,"/raw_data_backup")
 eval_round<-"R1" #R2
 
@@ -158,7 +158,7 @@ w_mean<-sum(grand_mean,na.rm=T)
 
 names(w_mean)<-"es_weighted_mean"
 
-writeRaster(w_mean, "P:/312204_pareus/WP2/T2.2/PGIS_ES_mapping/FRL04/es_weight_mean.tif", overwrite = TRUE)
+writeRaster(w_mean, "P:/312204_pareus/WP2/T2.2/PGIS_ES_mapping/FRA_BAR2/es_weight_mean.tif", overwrite = TRUE)
 
 ## subset ind_polys
 write_sf(ind_pols,paste0(main_dir,"/ind_polys_R1.gpkg"))

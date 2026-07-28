@@ -63,15 +63,6 @@ p_for <- problem(
   # Ensures planning units are either completely selected (1) or not (0)
   add_binary_decisions()
 
-# p_for <-
-#   prioritizr::problem(pu_for, c("sampled_reg_scaled","sampled_condition_scaled","inv_dist"), cost_column = c("sampled_cost_pol")) %>%
-#   add_min_set_objective() %>%
-#   add_boundary_penalties(penalty = 0.0005) %>%
-#   #add_neighbor_constraints(k = 5) %>%
-#   add_relative_targets(gap[gap$sampled_habitat == 3, ]$rel_gap) %>% # target = existing plus new = 10%
-#   #add_absolute_targets(82)%>%
-#   add_locked_out_constraints("lock_in") %>%
-#   add_binary_decisions()
 
 # solve problem
 forest <- solve(p_for)

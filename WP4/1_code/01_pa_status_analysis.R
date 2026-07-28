@@ -8,7 +8,7 @@ library(tidyr)
 
 # siteID<-"FRL04"
 #siteID<-"SK021"
-siteID<-"FRL04"
+siteID<-"TRD"
 target_core_prot_fraction <-0.1 #how much of each biome should be protected strictly
 main_dir<-"P:/312204_pareus/"
 
@@ -16,13 +16,14 @@ main_dir<-"P:/312204_pareus/"
 
 ## stud_area 
 stud_area<-read_sf(paste0(main_dir,"WP2/T2.2/PGIS_ES_mapping/",siteID,"/raw_data_backup/study_site.gpkg"))
-stud_area<-stud_area%>%filter(siteID=="FRL04")
-target_crs <- 2154 #adjust this for the area
+#stud_area<-stud_area%>%filter(siteID=="FRA_BAR2")
+# target_crs <- 2154 #adjust this france
+target_crs<-25833
 stud_area<-st_transform(stud_area,target_crs)
 total_area<-st_area(stud_area)
 stud_ara_vect <- vect(stud_area)
 
-grid <- st_make_grid(stud_area, cellsize = 750, square = F)
+grid <- st_make_grid(stud_area, cellsize = 1200, square = F) # depending on the size FRA SVK 750 TRD 1200
 grid <- st_sf(geometry = grid)
 
 
@@ -52,7 +53,7 @@ grid<-grid%>%filter(!is.na(sampled_habitat))
 lulc_stats<-grid%>%group_by(sampled_habitat)%>%summarise(area_km2=sum(as.numeric(area))/10^6)
 
 ## PA
-PA<-st_read(paste0(main_dir,"WP4/pa_existing/WDPA_FRL04.shp"))
+PA<-st_read(paste0(main_dir,"WP4/pa_existing/WDPA_",siteID,".shp"))
 PA<-st_transform(PA,st_crs(target_crs))
 PA <- st_intersection(PA, stud_area)
 PA<-st_make_valid(PA)
@@ -184,7 +185,7 @@ df_long$type <- factor(df_long$type, levels = c("gap_core_prot", "area_km2"))
 
 df_long<-df_long%>%mutate(lulc=case_when(sampled_habitat == 3 ~ "Forest",
                         sampled_habitat == 4 ~ "Wetlands",
-                        sampled_habitat == 5 ~ "Water"))
+                        sampled_habitat == 5 ~ "Water"))%>%filter(!is.na(lulc))
 
 p<-ggplot(df_long, aes(x = lulc, y = area, fill = type)) +
   geom_col() +
