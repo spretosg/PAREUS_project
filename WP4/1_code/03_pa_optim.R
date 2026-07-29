@@ -16,12 +16,13 @@ stud_area<-stud_area%>%filter(siteID=="FRL04")
 pu<-st_read(paste0("WP4/2_output/02_optim/",siteID,"_input_final_grid.json"))
 pu$ID<-c(1:nrow(pu))
 pu$area<-as.numeric(st_area(pu))
+pu$inv_cost_pol<-1/pu$sampled_cost_pol
 
-pu<-pu%>%mutate(lock_in = case_when(
-  is.na(class) ~  FALSE,
-  class>5 ~ TRUE,
-  class<6 ~ FALSE
-))
+# pu<-pu%>%mutate(lock_out = case_when(
+#   is.na(class) ~  FALSE,
+#   class>5 ~ TRUE,
+#   class<6 ~ FALSE
+# ))
 
 
 pu<-pu%>%mutate(inv_dist = case_when(
@@ -29,156 +30,49 @@ pu<-pu%>%mutate(inv_dist = case_when(
   min_distance_scaled>0 ~ 1/min_distance_scaled
 ))
 
+pu<-zero_one_scale(
+  pu,
+  cols = c("inv_dist", "inv_cost_pol")
+)
+
 # remove border patches:
 pu$area<-pu$area/10^6
 pu<-pu%>%filter(area >= 0.48713)
 
-gap_all<-0.1-sum(gap$area_km2)/sum(gap$tot_habitat_area)
 
-# make subsets for forest, wetlands and water
-pu_for<-pu%>%filter(sampled_habitat==3)
-pu_wetl<-pu%>%filter(sampled_habitat==4)
-pu_wat<-pu%>%filter(sampled_habitat==5)
+core_pa_for<-pa_optim(pu,target_lulc ="forest",lockin_col="core_prot_area_old",area_budget = gap[gap$lulc_name == "forest", ]$target_area/10^6)
+core_pa_wat<-pa_optim(pu,target_lulc ="water",lockin_col="core_prot_area_old",area_budget = gap[gap$lulc_name == "water", ]$target_area/10^6)
+core_pa_wetl<-pa_optim(pu,target_lulc ="wetland",lockin_col="core_prot_area_old",area_budget = gap[gap$lulc_name == "wetland", ]$target_area/10^6)
+core_pa_agri<-pa_optim(pu,target_lulc ="agricultural",lockin_col="core_prot_area_old",area_budget = gap[gap$lulc_name == "agricultural", ]$target_area/10^6)
+core_pa_global<-pa_optim(pu=pu,lockout = "built-up",lockin_col="core_prot_area_old",area_budget = gap[gap$lulc_name == "global_0.1_prot", ]$target_area/10^6)
 
-# ---- single LULC optim ----
-#standardize within ecosystem
-pu_for$inv_cost_pol<-1/pu_for$sampled_cost_pol
-pu_for$reg_sc  <- pu_for$sampled_reg / max(pu_for$sampled_reg )
-pu_for$cond_sc <- pu_for$sampled_condition  / max(pu_for$sampled_condition)
-pu_for$conn_sc <- pu_for$inv_dist / max(pu_for$inv_dist )
-pu_for$cost_sc <- pu_for$inv_cost_pol / max(pu_for$inv_cost_pol)
-
-
-area_budget <- gap[gap$sampled_habitat == 3, ]$rel_gap * sum(pu_for$area)
-# optimization problem
-p_for <- problem(
-  pu_for,
-  features = c("reg_sc", "cond_sc", "conn_sc", "cost_sc"),
-  cost_column = "area" # Cost is set to area to enforce the area budget
-) %>%
-  # Maximizes feature values strictly within your 30% area budget
-  add_max_utility_objective(budget = area_budget) %>%
-  add_boundary_penalties(penalty = 0.0005) %>% 
-  
-  # Ensures planning units are either completely selected (1) or not (0)
-  add_binary_decisions()
-
-
-# solve problem
-forest <- solve(p_for)
-# plot map of prioritization
-plot(
-  st_as_sf(forest[, "solution_1"]), main = "Prioritization",
-  pal = c("grey90", "darkgreen")
-)
-
-
-#additional area
-add_core_pa_for<-forest%>%filter(solution_1==1)
-
-#### WATER ####
-
-pu_wat$inv_cost_pol<-1/pu_wat$sampled_cost_pol
-pu_wat$reg_sc  <- pu_wat$sampled_reg / max(pu_wat$sampled_reg )
-pu_wat$cond_sc <- pu_wat$sampled_condition  / max(pu_wat$sampled_condition)
-pu_wat$conn_sc <- pu_wat$inv_dist / max(pu_wat$inv_dist )
-pu_wat$cost_sc <- pu_wat$inv_cost_pol / max(pu_wat$inv_cost_pol)
-
-
-area_budget <- gap[gap$sampled_habitat == 5, ]$rel_gap * sum(pu_wat$area)
-# optimization problem
-p_wat <- problem(
-  pu_wat,
-  features = c("reg_sc", "cond_sc", "conn_sc", "cost_sc"),
-  cost_column = "area" # Cost is set to area to enforce the area budget
-) %>%
-  # Maximizes feature values strictly within your 30% area budget
-  add_max_utility_objective(budget = area_budget) %>%
-  add_boundary_penalties(penalty = 0.0005) %>% 
-  
-  # Ensures planning units are either completely selected (1) or not (0)
-  add_binary_decisions()
-
-
-
-# p_wat <-
-#   problem(pu_wat, c("sampled_reg","sampled_condition","inv_dist"), cost_column = "sampled_cost_pol") %>%
-#   add_min_set_objective() %>%
-#   add_boundary_penalties(penalty = 0.0005) %>% # spatially clump planning units togethe
-#   #add_neighbor_constraints(k = 3) %>%
-#   add_relative_targets(gap[gap$sampled_habitat == 5, ]$rel_gap) %>%
-#   #add_relative_targets(0.1) %>%
-#   #add_absolute_targets(40)%>%
-#   #add_locked_out_constraints("lock_in") %>%
-#   add_binary_decisions()
-
-wat <- solve(p_wat)
-plot(
-  st_as_sf(wat[, "solution_1"]), main = "Prioritization",
-  pal = c("grey90", "darkgreen")
-)
-add_core_pa_wat<-wat%>%filter(solution_1==1)
-
-
-
-pu_wetl$inv_cost_pol<-1/pu_wetl$sampled_cost_pol
-pu_wetl$reg_sc  <- pu_wetl$sampled_reg / max(pu_wetl$sampled_reg )
-pu_wetl$cond_sc <- pu_wetl$sampled_condition  / max(pu_wetl$sampled_condition)
-pu_wetl$conn_sc <- pu_wetl$inv_dist / max(pu_wetl$inv_dist )
-pu_wetl$cost_sc <- pu_wetl$inv_cost_pol / max(pu_wetl$inv_cost_pol)
-
-
-area_budget <- gap[gap$sampled_habitat == 4, ]$rel_gap * sum(pu_wetl$area)
-
-
-# 2. Build the optimization problem
-p_wetl <- problem(
-  pu_wetl,
-  features = c("reg_sc", "cond_sc", "conn_sc", "cost_sc"),
-  cost_column = "area" # Cost is set to area to enforce the area budget
-) %>%
-  # Maximizes feature values strictly within your 30% area budget
-  add_max_utility_objective(budget = area_budget) %>%
-  add_boundary_penalties(penalty = 0.0005) %>% 
-  
-  # Ensures planning units are either completely selected (1) or not (0)
-  add_binary_decisions()
-
-# p_wetl <-
-#   problem(pu_wetl, c("sampled_reg","sampled_condition",""), cost_column = "sampled_cost_es") %>%
-#   add_min_set_objective() %>%
-#   add_boundary_penalties(penalty = 0.0005) %>%
-#   #add_neighbor_constraints(k = 3) %>%
-#   add_relative_targets(gap[gap$sampled_habitat == 4, ]$rel_gap) %>%
-#   #add_absolute_targets(40)%>%
-#   
-#   #add_locked_out_constraints("lock_in") %>%
-#   add_binary_decisions()
-wetl <- solve(p_wetl)
-plot(
-  st_as_sf(wetl[, "solution_1"]), main = "Prioritization",
-  pal = c("grey90", "darkgreen")
-)
-
-# plot(
-#       st_as_sf(wetl[, "area"]), main = "Prioritization"
-#    )
-
-add_core_pa_wetl<-wetl%>%filter(solution_1==1)
-
-PA_single_lulc<-rbind(forest,wetl,wat)
+PA_single_lulc<-rbind(core_pa_agri,core_pa_for,core_pa_wat,core_pa_wetl)
 
 pu <- pu %>%
   left_join(PA_single_lulc %>%st_drop_geometry()%>% dplyr::select(ID, solution_1),
             by = "ID")
 names(pu)[names(pu) == "solution_1"] <- "optim_PA_single_lulc"
 
+pu <- pu %>%
+  left_join(core_pa_global %>%st_drop_geometry()%>% dplyr::select(ID, solution_1),
+            by = "ID")
+names(pu)[names(pu) == "solution_1"] <- "optim_PA_global"
+
 
 pu <- pu %>%
   mutate(core_pa_lulc = case_when(
-    lock_in == TRUE            ~ "existing core pa",
+    core_prot_area_old == TRUE            ~ "existing core pa",
     optim_PA_single_lulc == 1 & n_pa == 0 ~ "new core PA",
     optim_PA_single_lulc == 1 & n_pa >0 ~ "proposed upgrade existing PA",
+    TRUE                       ~ "other"
+  ))
+
+
+pu <- pu %>%
+  mutate(core_pa_global = case_when(
+    core_prot_area_old == TRUE            ~ "existing core pa",
+    optim_PA_global == 1 & n_pa == 0 ~ "new core PA",
+    optim_PA_global == 1 & n_pa >0 ~ "proposed upgrade existing PA",
     TRUE                       ~ "other"
   ))
 
@@ -189,6 +83,15 @@ pu$core_pa_lulc <- factor(pu$core_pa_lulc,
                            "proposed upgrade existing PA",
                            "other"
                          )
+)
+
+pu$core_pa_global <- factor(pu$core_pa_global,
+                          levels = c(
+                            "existing core pa",
+                            "new core PA",
+                            "proposed upgrade existing PA",
+                            "other"
+                          )
 )
 
 pu<-pu%>%mutate(is_core_prot_lulc = case_when(
@@ -213,30 +116,91 @@ map_lulc <- ggplot(pu) +
 ggsave(paste0("WP4/2_output/02_optim/",siteID,"_pa_optim.png"), plot = map_lulc, width = 18, height = 10, dpi = 300)
 
 
-stats_lulc_optim<-pu%>%filter(core_pa_lulc!="other" )%>%group_by(sampled_habitat,core_pa_lulc)%>%
+stats_lulc_optim<-pu%>%mutate(core_pa = core_pa_lulc)%>%filter(core_pa!="other" )%>%group_by(lulc_name,core_pa)%>%
   summarise(ec_mean = mean(sampled_condition_scaled),
             ec_sd = sd(sampled_condition_scaled),
-            km2 = sum(area)/10^6)%>%st_drop_geometry()
+            km2 = sum(area))%>%st_drop_geometry() %>%mutate(scenario = "LULC")
+
+stats_lulc_global<-pu%>%mutate(core_pa = core_pa_global)%>%filter(core_pa!="other" )%>%group_by(lulc_name,core_pa)%>%
+  summarise(ec_mean = mean(sampled_condition_scaled),
+            ec_sd = sd(sampled_condition_scaled),
+            km2 = sum(area))%>%st_drop_geometry()%>%mutate(scenario = "global")
 
 
+stats<-rbind(stats_lulc_optim,stats_lulc_global)
 
+library(ggplot2)
 
-p_box <- ggplot(pu, aes(x = core_pa_lulc, y = sampled_habitat, fill = core_pa_lulc)) +
-  geom_boxplot() +
-  scale_fill_manual(values = cols, name = NULL, na.translate = FALSE) +
-  theme_minimal() +
-  theme(legend.position = "none",text = element_text(size = 20))+
+ggplot(stats%>%filter(lulc_name != "built-up"),
+       aes(x = scenario,
+           y = km2,
+           fill = core_pa)) +
+  geom_col(
+    position = position_dodge(width = 0.8),
+    width = 0.7
+  ) +
+  facet_wrap(~ lulc_name, scales = "free_y") +
+  scale_fill_brewer(palette = "Set2") +
   labs(
-    x = "",
-    y = "Ecosystem condition",
-    fill = ""
+    x = NULL,
+    y = expression("Area (km"^2*")"),
+    fill = NULL
+  ) +
+  theme_bw() +
+  theme(
+    legend.position = "top",
+    strip.background = element_blank(),
+    axis.text.x = element_text(angle = 30, hjust = 1)
   )
+
+pd <- position_dodge(width = 0.8)
+
+ggplot(
+  stats %>% filter(lulc_name != "built-up"),
+  aes(x = scenario,
+      y = ec_mean,
+      fill = core_pa)
+) +
+  geom_col(
+    position = pd,
+    width = 0.7
+  ) +
+  geom_errorbar(
+    aes(ymin = ec_mean - ec_sd,
+        ymax = ec_mean + ec_sd),
+    position = pd,
+    width = 0.2,
+    linewidth = 0.4
+  ) +
+  facet_wrap(~lulc_name, scales = "free_y") +
+  scale_fill_brewer(palette = "Set2") +
+  labs(
+    x = NULL,
+    y = "Mean ecosystem condition",
+    fill = NULL
+  ) +
+  theme_bw() +
+  theme(
+    legend.position = "top",
+    strip.background = element_blank(),
+    axis.text.x = element_text(angle = 30, hjust = 1))
+
+# p_box <- ggplot(stats, aes(x = core_pa_lulc, y = sampled_habitat, fill = core_pa_lulc)) +
+#   geom_boxplot() +
+#   scale_fill_manual(values = cols, name = NULL, na.translate = FALSE) +
+#   theme_minimal() +
+#   theme(legend.position = "none",text = element_text(size = 20))+
+#   labs(
+#     x = "",
+#     y = "Ecosystem condition",
+#     fill = ""
+#   )
 
 ggsave(paste0("WP4/2_output/02_optim/",siteID,"_ec_pa_optim.png"), plot = p_box, width = 18, height = 10, dpi = 300)
 
-kruskal.test(sampled_condition ~ core_prot, data = pu_stats)
-
-pairwise.wilcox.test(pu_stats$sampled_condition, pu_stats$core_prot, p.adjust.method = "BH")
+# kruskal.test(sampled_condition ~ core_prot, data = pu_stats)
+# 
+# pairwise.wilcox.test(pu_stats$sampled_condition, pu_stats$core_prot, p.adjust.method = "BH")
 
 #save PU for OECM analysis
-st_write(pu,paste0("WP4/2_output/02_optim/PA_optim_",siteID,".geojson"))
+st_write(pu,paste0("WP4/2_output/02_optim/PA_optim_grid",siteID,".geojson"))

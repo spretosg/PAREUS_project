@@ -10,7 +10,7 @@ source("WP4/1_code/wp4_functions_utils.R")
 
 
 main_dir<-"P:/312204_pareus/"
-siteID<-"FRA_BAR2"
+siteID<-"FRL04"
 
 ## read grid from 01_pa_status.R
 grid<-st_read(paste0("WP4/2_output/02_optim/",siteID,"_input_grid.json"))
@@ -39,9 +39,7 @@ mean_reg <- mean(es_raster[[c(2, 4, 5)]])
 es_cond<-paste0(main_dir,"WP4/features/",siteID,"_ec.tif")
 es_cond<-terra::rast(es_cond)
 
-##habitat (from lulc)
-habitat<-paste0(main_dir,"WP4/habitat/",siteID,"_lulc.tif")
-habitat<-terra::rast(habitat)
+
 
 ##pop (world pop cover 2020)
 pop25<-paste0(main_dir,"WP4/lock_out/pop_2025_",siteID,".tif")
@@ -82,8 +80,8 @@ grid$sampled_condition<- terra::extract(es_cond, grid, fun = mean, na.rm = TRUE)
 
 
 #calculate distance from cells outside core PA to core PA (IUCN Ia II)
-out   <- grid%>%filter(is.na(class)|class<6)
-pa_core <- grid%>%filter(class>5)
+out   <- grid%>%filter(exisiting_corePA == F)
+pa_core <- grid%>%filter(exisiting_corePA == T)
 dist_matrix <- st_distance(out, pa_core)
 
 out$min_distance <- apply(dist_matrix, 1, min)
@@ -92,7 +90,7 @@ grid<-rbind(out,pa_core)
 
 
 grid_clean <- grid %>%
-  filter(!if_any(all_of(c("sampled_es","sampled_cult","sampled_prov","sampled_reg","sampled_cost_es","sampled_cost_pol","sampled_condition","sampled_habitat")), ~ is.na(.) | is.nan(.)))
+  filter(!if_any(all_of(c("sampled_es","sampled_cult","sampled_prov","sampled_reg","sampled_cost_es","sampled_cost_pol","sampled_condition")), ~ is.na(.) | is.nan(.)))
 
 
 

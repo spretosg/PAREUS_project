@@ -16,10 +16,10 @@ source("WP4/1_code/wp4_functions_utils.R")
 main_dir<-"P:/312204_pareus/"
 siteID<-"FRL04"
 
-stud_area<-read_sf(paste0(main_dir,"WP2/T2.2/PGIS_ES_mapping/",siteID,"/raw_data_backup/study_site.gpkg"))
-stud_area<-stud_area%>%filter(siteID=="FRL04")
+stud_area<-read_sf(paste0(main_dir,"WP2/T2.2/PGIS_ES_mapping/",siteID,"/raw_data_backup/stud_site.gpkg"))
+stud_area<-stud_area%>%filter(siteID=="SK021")
 
-pu<-st_read(paste0("WP4/2_output/02_optim/PA_optim_",siteID,".geojson"))# pu<-st_read("WP4/2_output/02_optim/FRL04_input_final_grid.geojson")
+pu<-st_read(paste0("WP4/2_output/02_optim/PA_optim_grid",siteID,".geojson"))# pu<-st_read("WP4/2_output/02_optim/FRL04_input_final_grid.geojson")
 
 
 es_cond<-paste0(main_dir,"WP4/features/",siteID,"_ec.tif")
@@ -56,16 +56,6 @@ resistance<-log(1/r_adjusted)
 plot(resistance)
 ### connectivity
 
-# calculate connectivity of optimized core protected areas
-# cells <- pu %>% 
-#   filter(solution_1>0 | lock_in == T)
-# 
-# # 2. Union touching cells
-# core_pa <- cells %>%
-#   summarise(geometry = st_union(geometry)) %>%
-#   st_cast("POLYGON")%>%st_transform(st_crs(resistance))
-# core_cent <- st_coordinates(st_centroid(core_pa))
-# 
 r_coarse <- aggregate(resistance, fact = 1)
 r_coarse
 
@@ -91,28 +81,18 @@ print(Sys.time()-start)
 mw_result <- terra::project(mw_result, sf::st_crs(pu)$wkt)
 writeRaster(mw_result,paste0("WP4/2_output/02_optim/mw_connectivity_",siteID,".tif"))
 
-#mw_result<-rast(paste0("WP4/2_output/02_optim/mw_connectivity_",siteID,".tif"))
+mw_result<-rast(paste0("WP4/2_output/02_optim/mw_connectivity_",siteID,".tif"))
 
 # sample connetivity values to pu
 pu$mw_connectivity<- terra::extract(mw_result$normalized_current, pu, fun = mean, na.rm = TRUE)[,2]
 
-conn<-ggplot(pu%>%filter(mw_connectivity<1)) +
+conn<-ggplot(pu) +
     geom_sf(aes(fill = mw_connectivity), color = NA) +
     scale_fill_viridis_c(option = "plasma", name = "Connectivity") +
     geom_sf(data = stud_area, fill = NA, color = "black") +
     theme_minimal()+
     theme(text = element_text(size = 20))
-  #ggsave(paste0("WP4/2_output/02_optim/",siteID,"_OECM_suit.png"), plot = p, width = 8, height = 6, dpi = 300)
-
-
-
-pu<-pu%>%mutate(LULC_class = case_when(sampled_habitat ==1 ~ "artificial_surfaces",
-                                       sampled_habitat ==2 ~ "agricultural_areas",
-                                       sampled_habitat ==3 ~ "forests",
-                                       sampled_habitat ==4 ~ "wetlands",
-                                       sampled_habitat ==5 ~ "water"))
-
-
+  ggsave(paste0("WP4/2_output/02_optim/",siteID,"_conn.png"), plot = conn, width = 8, height = 6, dpi = 300)
 
 
 st_write(pu,paste0("WP4/2_output/02_optim/PA_optim_conn_",siteID,".geojson"))
