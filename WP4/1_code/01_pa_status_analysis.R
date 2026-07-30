@@ -123,24 +123,25 @@ gap_lulc <- protection_gap(
 gap<-rbind(gap_lulc,gap_glob)
 gap<-gap%>%filter(!is.na(lulc_name))
 
-p<-ggplot() +
-     geom_sf(
-       data = grid%>%filter(n_pa>0),
-        aes(fill = n_pa),
-     color = "NA"  )+
-  scale_fill_gradient(
-    high = "#C50202",
-    low = "#FFC2C2",
-    space = "Lab",
-    na.value = "grey50",
-  )+
-  geom_sf(data = stud_area, fill = NA, color = "black") +
-  theme_minimal()+
-  theme(text = element_text(size = 20))
-ggsave(paste0("WP4/2_output/01_PA_analysis/",siteID,"_n_pa.png"), plot = p, width = 8, height = 6, dpi = 300)
+#overlaying PAs
+# p<-ggplot() +
+#      geom_sf(
+#        data = grid%>%filter(n_pa>0),
+#         aes(fill = n_pa),
+#      color = "NA"  )+
+#   scale_fill_gradient(
+#     high = "#C50202",
+#     low = "#FFC2C2",
+#     space = "Lab",
+#     na.value = "grey50",
+#   )+
+#   geom_sf(data = stud_area, fill = NA, color = "black") +
+#   theme_minimal()+
+#   theme(text = element_text(size = 20))
+# ggsave(paste0("WP4/2_output/01_PA_analysis/",siteID,"_n_pa.png"), plot = p, width = 8, height = 6, dpi = 300)
+# 
 
-
-
+# PA classes
 p<-ggplot() +
   geom_sf(
     data = grid,
@@ -206,11 +207,13 @@ write.csv(gap,paste0("WP4/2_output/01_PA_analysis/",siteID,"_gap_analysis.csv"))
 
 ### gap plot
 
-p<-gap_plot <- gap %>%
-  select(lulc_name, protected_area, gap_area) %>%
-  pivot_longer(-lulc_name,
-               names_to = "status",
-               values_to = "area")
+gap_plot <- gap %>%
+  dplyr::select(lulc_name, protected_area, gap_area) %>%
+  tidyr::pivot_longer(
+    cols = c(protected_area, gap_area),
+    names_to = "status",
+    values_to = "area"
+  )
 
 ggplot(gap_plot,
        aes(y = reorder(lulc_name, area),
@@ -229,10 +232,10 @@ ggplot(gap_plot,
   ) +
   
   scale_fill_manual(values = c(
-    protected_area = "#2E8B57",
+    protected_area = "#00A300",
     gap_area = "#D95F02"
   ),
-  labels = c("Gap", "Protected")) +
+  labels = c("Gap", "Existing core PA")) +
   
   labs(
     x = expression("Area (km"^2*")"),

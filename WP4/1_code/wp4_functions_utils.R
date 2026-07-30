@@ -261,17 +261,18 @@ plot_pca_map<-function(pu,
   other <- other[!other$ID %in% oecm$ID, ]
   other <- other[!other$ID %in% other_pa_filt$ID, ]
   
-  stats_oecm<-oecm%>%group_by(pa_group,sampled_habitat)%>%summarise(area = sum(area))%>%st_drop_geometry()
-  stats_other_pa<-other_pa_filt%>%group_by(sampled_habitat)%>%summarise(area = sum(area))%>%st_drop_geometry()
-  stats_core_pa<-core_pa%>%group_by(sampled_habitat)%>%summarise(area = sum(area))%>%st_drop_geometry()
-  stats_other<-other%>%group_by(sampled_habitat)%>%summarise(area = sum(area))%>%st_drop_geometry()
+  stats_oecm<-oecm%>%group_by(pa_group,lulc_name)%>%summarise(area = sum(area))%>%st_drop_geometry()%>%mutate(scenario = scen)
+  stats_other_pa<-other_pa_filt%>%group_by(lulc_name)%>%summarise(area = sum(area))%>%st_drop_geometry()%>%mutate(scenario = scen, pa_group = "other_pa")
+  stats_core_pa<-core_pa%>%group_by(lulc_name)%>%summarise(area = sum(area))%>%st_drop_geometry()%>%mutate(scenario = scen, pa_group = "core_pa")
+  stats_other<-other%>%group_by(lulc_name)%>%summarise(area = sum(area))%>%st_drop_geometry()%>%mutate(scenario = scen, pa_group = "not_protected")
   
-  total<-dat%>%group_by(sampled_habitat)%>%summarise(area = sum(area))%>%st_drop_geometry()
+  t<-rbind(stats_other_pa,stats_oecm,stats_core_pa,stats_other)
+  total<-dat%>%group_by(lulc_name)%>%summarise(area = sum(area))%>%st_drop_geometry()%>%mutate(scenario = scen)
   
   cols <- c(
     "existing core pa" = "#00A300",
-    "new core PA" = "#00FF00",
-    "proposed upgrade existing PA" = "#B8FFB8"
+    "new core PA" = "#bf8bff",
+    "proposed upgrade existing PA" = "#e5d0ff"
   )
   
   p<-ggplot() +
@@ -285,8 +286,8 @@ plot_pca_map<-function(pu,
             aes(fill = pa_group),
             color = NA) +
     scale_fill_manual(
-      values = c("Other PA (IUCN III-VI) high suitability for OECM" = "#388ca7",
-                 "High OECM suitability not protected - potential OECM" = "#4B0082",
+      values = c("Other PA (IUCN III-VI) high suitability for OECM" = "#44a6c6",
+                 "High OECM suitability not protected - potential OECM" = "#194553",
                  "Other protected areas (IUCN III-VI)" = "#ADD8E6"),
       name = NULL
     )  +
@@ -306,5 +307,15 @@ plot_pca_map<-function(pu,
     geom_sf(data = stud_area, fill = NA, color = "black") +
     theme_minimal()+
     ggtitle(scen)
+  
+  list(
+    plot = p,
+    stats = t,
+    # stats_oecm = stats_oecm,
+    # stats_other_pa = stats_other_pa,
+    # stats_core_pa = stats_core_pa,
+    # stats_other = stats_other,
+    total_area = total
+  )
   
 }
