@@ -6,62 +6,66 @@ library(dplyr)
 library(ggplot2)
 library(tidyr)
 source("WP4/1_code/wp4_functions_utils.R")
-
-# siteID<-"FRL04"
-#siteID<-"SK021"
 siteID<-"FRL04"
-target_core_prot_fraction <-0.1 #how much of each biome should be protected strictly
 main_dir<-"P:/312204_pareus/"
 
-#inputs
+####---- User parameter ----####
+#Parameters to set, ev to develop in collaboration with stakeholders
+core_PA<-c("Ia","II") #WDPA categories to define as strictly protected areas
 
-## stud_area 
+#the targets depends on the scenario, a global scenario defines a global protection target across all LULC, the lulc targets are used if lulc specific protection is aimed
+target_glob <- 0.1 #global target for core protection across all LULC types
+target_lulc <-c(forest = 0.1, water = 0.2, wetland = 0.2, agricultural = 0.05) #lulc specific protection target
+PU_size<-1200 #lin m2 lower number increase the resolution but increase also computation time down stream
+
+####---- Input and processing ----####
+# study area
 stud_area<-read_sf(paste0(main_dir,"WP2/T2.2/PGIS_ES_mapping/",siteID,"/raw_data_backup/study_site.gpkg"))
-stud_area<-stud_area%>%filter(siteID=="FRL04")
-# target_crs <- 2154 #adjust this france
+# LULC raster
+lulc<-terra::rast(paste0(main_dir,"WP4/habitat/",siteID,"_lulc.tif"))
+# current PA network
+PA<-st_read(paste0(main_dir,"WP4/pa_existing/WDPA_",siteID,".shp"))
+
+## spatial transformation
 target_crs<-25833
 stud_area<-st_transform(stud_area,target_crs)
-total_area<-st_area(stud_area)
-stud_ara_vect <- vect(stud_area)
+lulc <- project(lulc, paste0("epsg:",target_crs))
+PA<-st_transform(PA,st_crs(target_crs))
 
-grid <- st_make_grid(stud_area, cellsize = 1200, square = F) # depending on the size FRA SVK 750 TRD 1200
-grid <- st_sf(geometry = grid)
+#crop to study area
+stud_area<-stud_area%>%filter(siteID=="FRL04")
+lulc <- crop(lulc, vect(stud_area))
+lulc <- mask(lulc, vect(stud_area))
+PA <- PA%>%st_intersection(stud_area)%>%st_make_valid()
 
+## establish a grid of planning units PU with an ID
+grid <- stud_area %>%
+  st_make_grid(cellsize = PU_size, square = FALSE) %>%
+  st_sf(geometry = ., id = seq_along(.)) %>%
+  st_intersection(stud_area["siteID"])
 
-grid<-st_intersection(grid,stud_area["siteID"])
-grid$ID<-c(1:nrow(grid))
 grid$area<-as.numeric(st_area(grid))
 
-# extract habitat per pu 
-lulc<-paste0(main_dir,"WP4/habitat/",siteID,"_lulc.tif")
-lulc<-terra::rast(lulc)
-lulc <- project(lulc, paste0("epsg:",target_crs))
-lulc <- crop(lulc, stud_ara_vect)
-lulc <- mask(lulc, stud_ara_vect)
-lulc<-floor(lulc / 100)
-lulc_highres <- disagg(lulc, fact = 5, method = "near")
-lulc_highres <- crop(lulc_highres, stud_ara_vect)
-lulc_highres <- mask(lulc_highres, stud_ara_vect)
+# extract habitat per PU 
+#only use LULC main classes
+lulc <- lulc %>%
+  (\(x) floor(x / 100))() %>%
+  disagg(fact = 5, method = "near")
 
-grid$sampled_habitat <- terra::extract(
-  lulc_highres,
-  vect(st_centroid(grid))
-)[,2]
+grid <- grid %>%
+  mutate(
+    sampled_habitat = terra::extract(
+      lulc,
+      terra::vect(st_centroid(.))
+    )[, 2]
+  )%>%filter(!is.na(sampled_habitat) & sampled_habitat != 0)
 
-#remove grid outside stud area
-grid<-grid%>%filter(!is.na(sampled_habitat))
-
-lulc_stats<-grid%>%group_by(sampled_habitat)%>%summarise(area_km2=sum(as.numeric(area))/10^6)
+## LULC statistics
+lulc_stats<-grid%>%st_drop_geometry()%>%group_by(sampled_habitat)%>%summarise(area_km2=sum(as.numeric(area))/10^6)
 
 ## sample PA status 
-PA<-st_read(paste0(main_dir,"WP4/pa_existing/WDPA_",siteID,".shp"))
-PA<-st_transform(PA,st_crs(target_crs))
-PA <- st_intersection(PA, stud_area)
-PA<-st_make_valid(PA)
-
-
 PA <- PA %>%
-  mutate(class = case_when(
+  mutate(prot_class = case_when(
     IUCN_CAT == "Not Applicable" ~ 1,
     IUCN_CAT == "Not Assigned" ~ 1,
     IUCN_CAT == "Not Reported" ~ 1,
@@ -74,8 +78,6 @@ PA <- PA %>%
     TRUE ~ 0
   ))
 
-#crop to study area
-PA<-st_intersection(PA,stud_area)
 
 grid<-grid%>%mutate(lulc_name = case_when(sampled_habitat == 1 ~ "built-up",
                                           sampled_habitat == 2 ~ "agricultural",
@@ -87,59 +89,39 @@ grid<-grid%>%mutate(lulc_name = case_when(sampled_habitat == 1 ~ "built-up",
 # get intersection index list
 ints <- st_intersects(grid, PA)
 
-# count unique IUCN categories per grid cell
-grid$n_pa <- sapply(ints, function(i) {
-  length(unique(PA$IUCN_CAT[i]))
-})
-
-#sample highest status of protection
-grid <- st_join(grid, PA[, c("class", "IUCN_CAT")], join = st_intersects)
 grid <- grid %>%
-  group_by(ID) %>%
-  slice_max(class, n = 1, with_ties = FALSE) %>%
+  mutate(
+    n_pa = sapply(ints, \(i) length(unique(PA$IUCN_CAT[i])))
+  ) %>%
+  st_join(PA[, c("prot_class", "IUCN_CAT")], join = st_intersects) %>%
+  group_by(id) %>%
+  slice_max(prot_class, n = 1, with_ties = FALSE) %>%
   ungroup()
 
 ### core prot vs other pa's
-grid<-grid%>%mutate(exisiting_corePA = case_when(class<6 ~ F, class>5 ~ T, is.na(class)~F))
+grid <- grid %>%
+  mutate(
+    existing_corePA = IUCN_CAT %in% core_PA
+  )
+# write grid for further processing
+st_write(grid, paste0("WP4/2_output/01_PA_analysis/",siteID,"_input_grid.json"), driver = "GeoJSON", overwrite = T)
 
-gap_glob <- protection_gap(
-  grid,
-  lulc_col = "lulc_name",
-  corePA_col = "exisiting_corePA",
-  lockout = "built-up",
-  mode = "global",
-  target = 0.1
-)
-
-gap_lulc <- protection_gap(
-  grid,
-  lulc_col = "lulc_name",
-  corePA_col = "exisiting_corePA",
-  lockout = "built-up",
-  mode = "class",
-  target = c(forest = 0.1, water = 0.2, wetland = 0.2, agricultural = 0.05)
-)
-
-gap<-rbind(gap_lulc,gap_glob)
-gap<-gap%>%filter(!is.na(lulc_name))
-
-#overlaying PAs
-# p<-ggplot() +
-#      geom_sf(
-#        data = grid%>%filter(n_pa>0),
-#         aes(fill = n_pa),
-#      color = "NA"  )+
-#   scale_fill_gradient(
-#     high = "#C50202",
-#     low = "#FFC2C2",
-#     space = "Lab",
-#     na.value = "grey50",
-#   )+
-#   geom_sf(data = stud_area, fill = NA, color = "black") +
-#   theme_minimal()+
-#   theme(text = element_text(size = 20))
-# ggsave(paste0("WP4/2_output/01_PA_analysis/",siteID,"_n_pa.png"), plot = p, width = 8, height = 6, dpi = 300)
-# 
+####---- Protection analysis ----####
+p<-ggplot() +
+     geom_sf(
+       data = grid%>%filter(n_pa>0),
+        aes(fill = n_pa),
+     color = "NA"  )+
+  scale_fill_gradient(
+    high = "#C50202",
+    low = "#FFC2C2",
+    space = "Lab",
+    na.value = "grey50",
+  )+
+  geom_sf(data = stud_area, fill = NA, color = "black") +
+  theme_minimal()+
+  theme(text = element_text(size = 20))
+ggsave(paste0("WP4/2_output/01_PA_analysis/",siteID,"_n_pa.png"), plot = p, width = 8, height = 6, dpi = 300)
 
 # PA classes
 p<-ggplot() +
@@ -164,6 +146,7 @@ p<-ggplot() +
   theme_minimal()
 ggsave(paste0("WP4/2_output/01_PA_analysis/",siteID,"_IUCN.png"), plot = p, dpi = 300)
 
+## area protected class
 p<-ggplot(grid%>%filter(!is.na(IUCN_CAT)),
           aes(x = IUCN_CAT,
               y = as.numeric(area))) +
@@ -179,32 +162,28 @@ p<-ggplot(grid%>%filter(!is.na(IUCN_CAT)),
 ggsave(paste0("WP4/2_output/01_PA_analysis/",siteID,"_area_stats_IUCN.png"), plot = p, width = 8, height = 6, dpi = 300)
 
 
+####---- Protection gap analysis ----####
 
+gap_glob <- protection_gap(
+  grid,
+  lulc_col = "lulc_name",
+  corePA_col = "exisiting_corePA",
+  lockout = "built-up",
+  mode = "global",
+  target = target_glob
+)
 
-# stats core prot per LULC
-# lulc_core_prot<-grid%>%
-#   group_by(sampled_habitat,core_prot_area_old)%>%
-#   summarise(area_km2=sum(area)/10^6)%>%
-#   st_drop_geometry()
-# 
-# lulc_gap<-grid%>%
-#   group_by(sampled_habitat)%>%
-#   summarise(tot_habitat_area = sum(as.numeric(area))/10^6,
-#             target_core_prot_area = target_core_prot_fraction *tot_habitat_area)%>%
-#   st_drop_geometry()
-#   
-# lulc_gap <- lulc_gap %>%
-#   left_join(lulc_core_prot%>%filter(core_prot_area_old == T), by = "sampled_habitat")
-# 
-# lulc_gap$area_km2[is.na(lulc_gap$area_km2)] <- 0
-# lulc_gap$gap_core_prot<-lulc_gap$target_core_prot_area - lulc_gap$area_km2
-# 
-# lulc_gap$rel_gap <- lulc_gap$gap_core_prot/lulc_gap$tot_habitat_area
+gap_lulc <- protection_gap(
+  grid,
+  lulc_col = "lulc_name",
+  corePA_col = "exisiting_corePA",
+  lockout = "built-up",
+  mode = "class",
+  target = target_lulc
+)
+
+gap<-rbind(gap_lulc,gap_glob)%>%filter(!is.na(lulc_name))
 write.csv(gap,paste0("WP4/2_output/01_PA_analysis/",siteID,"_gap_analysis.csv"))
-
-
-
-
 ### gap plot
 
 gap_plot <- gap %>%
@@ -221,16 +200,6 @@ ggplot(gap_plot,
            fill = status)) +
   
   geom_col(width = 0.8) +
-  
-  geom_errorbar(
-    data = gap,
-    aes(y = lulc_name,
-        xmin = target_area/1e6,
-        xmax = target_area/1e6),
-    inherit.aes = FALSE,
-    linewidth = 1.2
-  ) +
-  
   scale_fill_manual(values = c(
     protected_area = "#00A300",
     gap_area = "#D95F02"
@@ -250,11 +219,3 @@ ggplot(gap_plot,
   )
 
 ggsave(paste0("WP4/2_output/01_PA_analysis/",siteID,"_gap.png"), plot = p, width = 8, height = 6, dpi = 300)
-
-
-
-# write grid for further processing
-st_write(grid, paste0("WP4/2_output/02_optim/",siteID,"_input_grid.json"), driver = "GeoJSON", overwrite = T)
-
-
-

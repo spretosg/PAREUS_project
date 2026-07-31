@@ -9,14 +9,20 @@ source("WP4/1_code/wp4_functions_utils.R")
 
 main_dir<-"P:/312204_pareus/"
 siteID<-"FRL04"
+
+features<-c("sampled_eco_cond_scaled","sampled_es_reg_scaled","inv_cost_pol","inv_dist")
+
+
+####---- Input and processing ----####
+# defined gaps in 01_pa_status_analysis.R
 gap<-read.csv(paste0("WP4/2_output/01_PA_analysis/",siteID,"_gap_analysis.csv"))
 
 stud_area<-read_sf(paste0(main_dir,"WP2/T2.2/PGIS_ES_mapping/",siteID,"/raw_data_backup/study_site.gpkg"))
 stud_area<-stud_area%>%filter(siteID=="FRL04")
-
+# planning units
 pu<-st_read(paste0("WP4/2_output/02_optim/",siteID,"_input_final_grid.json"))
-pu$ID<-c(1:nrow(pu))
-pu$area<-as.numeric(st_area(pu))
+
+## inverse the costs since MARXAN takes maximization only
 pu$inv_cost_pol<-1/pu$sampled_cost_pol
 
 pu<-pu%>%mutate(inv_dist = case_when(
@@ -29,47 +35,56 @@ pu<-zero_one_scale(
   cols = c("inv_dist", "inv_cost_pol")
 )
 
-# remove border patches:
-pu$area<-pu$area/10^6
-pu<-pu%>%filter(area >= 0.48713)
+# remove partial PUs (otherwise area standardization of features and cost needed)
+pu$area_km2<-pu$area/10^6
+pu<-pu%>%filter(area_km2 > 1.2)
+
+####---- Optimization and data merge ----####
+# For each lulc run an optimization and one for the global scenario
+lulcs_to_optimize <- c("forest", "water", "wetland", "agricultural")
+
+PA_single_lulc <- lapply(lulcs_to_optimize, \(x)
+                         pa_optim(
+                           pu = pu,
+                           target_lulc = x,
+                           lockin_col = "exisiting_corePA",
+                           features = features,
+                           area_budget = gap$target_area[gap$lulc_name == x] / 1e6
+                         )
+) %>%
+  dplyr::bind_rows()
 
 
-core_pa_for<-pa_optim(pu,target_lulc ="forest",lockin_col="core_prot_area_old",area_budget = gap[gap$lulc_name == "forest", ]$target_area/10^6)
-core_pa_wat<-pa_optim(pu,target_lulc ="water",lockin_col="core_prot_area_old",area_budget = gap[gap$lulc_name == "water", ]$target_area/10^6)
-core_pa_wetl<-pa_optim(pu,target_lulc ="wetland",lockin_col="core_prot_area_old",area_budget = gap[gap$lulc_name == "wetland", ]$target_area/10^6)
-core_pa_agri<-pa_optim(pu,target_lulc ="agricultural",lockin_col="core_prot_area_old",area_budget = gap[gap$lulc_name == "agricultural", ]$target_area/10^6)
-core_pa_global<-pa_optim(pu=pu,lockout = "built-up",lockin_col="core_prot_area_old",area_budget = gap[gap$lulc_name == "global_0.1_prot", ]$target_area/10^6)
-
-PA_single_lulc<-rbind(core_pa_agri,core_pa_for,core_pa_wat,core_pa_wetl)
+core_pa_global<-pa_optim(pu=pu,lockout = "built-up",lockin_col="exisiting_corePA", features =features, area_budget = gap[gap$lulc_name == "global_0.1_prot", ]$target_area/10^6)
 
 pu <- pu %>%
-  left_join(PA_single_lulc %>%st_drop_geometry()%>% dplyr::select(ID, solution_1),
-            by = "ID")
+  left_join(PA_single_lulc %>%st_drop_geometry()%>% dplyr::select(id, solution_1),
+            by = "id")
 names(pu)[names(pu) == "solution_1"] <- "optim_PA_single_lulc"
 
 pu <- pu %>%
-  left_join(core_pa_global %>%st_drop_geometry()%>% dplyr::select(ID, solution_1),
-            by = "ID")
+  left_join(core_pa_global %>%st_drop_geometry()%>% dplyr::select(id, solution_1),
+            by = "id")
 names(pu)[names(pu) == "solution_1"] <- "optim_PA_global"
 
-
+## classify the different areas old and new core PAs
 pu <- pu %>%
   mutate(core_pa_lulc = case_when(
-    core_prot_area_old == TRUE   ~ "existing core pa",
+    exisiting_corePA == TRUE   ~ "existing core pa",
     optim_PA_single_lulc == 1 & n_pa == 0 ~ "new core PA",
     optim_PA_single_lulc == 1 & n_pa >0 ~ "proposed upgrade existing PA",
-    core_prot_area_old == FALSE & is.na(optim_PA_single_lulc) & n_pa == 0 ~ "not protected",
-    core_prot_area_old == FALSE & is.na(optim_PA_single_lulc) & n_pa > 0 ~ "other protected areas"
+    exisiting_corePA == FALSE & is.na(optim_PA_single_lulc) & n_pa == 0 ~ "not protected",
+    exisiting_corePA == FALSE & is.na(optim_PA_single_lulc) & n_pa > 0 ~ "other protected areas"
   ))
 
 
 pu <- pu %>%
   mutate(core_pa_global = case_when(
-    core_prot_area_old == TRUE  ~ "existing core pa",
+    exisiting_corePA == TRUE  ~ "existing core pa",
     optim_PA_global == 1 & n_pa == 0 ~ "new core PA",
     optim_PA_global == 1 & n_pa >0 ~ "proposed upgrade existing PA",
-    core_prot_area_old == FALSE & is.na(optim_PA_global)  & n_pa == 0 ~ "not protected",
-    core_prot_area_old == FALSE & is.na(optim_PA_global)  & n_pa > 0 ~ "other protected areas"
+    exisiting_corePA == FALSE & is.na(optim_PA_global)  & n_pa == 0 ~ "not protected",
+    exisiting_corePA == FALSE & is.na(optim_PA_global)  & n_pa > 0 ~ "other protected areas"
   ))
 
 pu$core_pa_lulc <- factor(pu$core_pa_lulc,
@@ -102,6 +117,8 @@ pu<-pu%>%mutate(is_core_prot_global = case_when(
   core_pa_global != "other" ~T
 ))
 
+st_write(pu,paste0("WP4/2_output/02_optim/PA_optim_grid",siteID,".geojson"))
+####---- Stats and plots ----####
 cols <- c(
   "existing core pa" = "#00A300",
   "new core PA" = "#bf8bff",
@@ -109,7 +126,7 @@ cols <- c(
   "other" = NA
 )
 
-map_lulc <- ggplot(pu) +
+map_pa <- ggplot(pu) +
   geom_sf(aes(fill = core_pa_lulc), color = NA) +
   scale_fill_manual(values = cols, name = NULL, na.translate = FALSE) +
   geom_sf(data = stud_area, fill = NA, color = "black") +
@@ -117,30 +134,30 @@ map_lulc <- ggplot(pu) +
   theme(
     legend.position = "top",
     text = element_text(size = 15)
-  )+ggtitle("PA single LULC")
+  )+ggtitle("PA LULC")
 
 ggsave(paste0("WP4/2_output/02_optim/",siteID,"_pa_global_optim.png"), plot = map_lulc, width = 18, height = 10, dpi = 300)
 
 
 stats_lulc_optim<-pu%>%mutate(core_pa = core_pa_lulc)%>%group_by(lulc_name,core_pa)%>%
-  summarise(ec_mean = mean(sampled_condition_scaled),
-            ec_sd = sd(sampled_condition_scaled),
-            km2 = sum(area),
-            reg_mean = mean(sampled_reg_scaled),
-            reg_sd = sd(sampled_reg_scaled),
-            pol_cost_mean = mean(sampled_cost_pol),
-            cost_sd = sd(sampled_cost_pol),
+  summarise(ec_mean = mean(sampled_eco_cond_scaled),
+            ec_sd = sd(sampled_eco_cond_scaled),
+            km2 = sum(area_km2),
+            reg_mean = mean(sampled_es_reg_scaled),
+            reg_sd = sd(sampled_es_reg_scaled),
+            pol_cost_mean = mean(sampled_cost_policy),
+            cost_sd = sd(sampled_cost_policy),
             dist_mean = mean(min_distance),
             dist_sd = sd(min_distance))%>%st_drop_geometry() %>%mutate(scenario = "LULC")
 
 stats_global_optim<-pu%>%mutate(core_pa = core_pa_global)%>%group_by(lulc_name,core_pa)%>%
-  summarise(ec_mean = mean(sampled_condition_scaled),
-            ec_sd = sd(sampled_condition_scaled),
-            km2 = sum(area),
-            reg_mean = mean(sampled_reg_scaled),
-            reg_sd = sd(sampled_reg_scaled),
-            pol_cost_mean = mean(sampled_cost_pol),
-            cost_sd = sd(sampled_cost_pol),
+  summarise(ec_mean = mean(sampled_eco_cond_scaled),
+            ec_sd = sd(sampled_eco_cond_scaled),
+            km2 = sum(area_km2),
+            reg_mean = mean(sampled_es_reg_scaled),
+            reg_sd = sd(sampled_es_reg_scaled),
+            pol_cost_mean = mean(sampled_cost_policy),
+            cost_sd = sd(sampled_cost_policy),
             dist_mean = mean(min_distance),
             dist_sd = sd(min_distance))%>%st_drop_geometry()%>%mutate(scenario = "GLOBAL")
 
@@ -177,8 +194,6 @@ ggplot(stats%>%filter(core_pa != "other protected areas" & !is.na(lulc_name) & l
     axis.text.x = element_text(angle = 30, hjust = 1)
   )
 
-
-st_write(pu,paste0("WP4/2_output/02_optim/PA_optim_grid",siteID,".geojson"))
 
 cols <- c(
   "existing core pa" = "#00A300",
@@ -237,8 +252,3 @@ stats %>%
     )),
     linetype = "none"
   )
-
-
-
-
-

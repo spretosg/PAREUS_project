@@ -79,9 +79,9 @@ protection_gap <- function(x,
 pa_optim<-function(pu,
                    target_lulc = NULL,
                    lockout = NULL,
-                   lockin_col = "core_prot_area_old",
-                   features = c("sampled_condition_scaled", "sampled_reg_scaled", "inv_dist", "inv_cost_pol"),
-                   area_budget = NULL
+                   lockin_col,
+                   features,
+                   area_budget
 ){
   #filter out lockout e.g. built-up
   if (!is.null(lockout)) {
@@ -97,7 +97,7 @@ pa_optim<-function(pu,
   pa_problem<- problem(
     pu,
     features = features,
-    cost_column = "area" # Cost is set to area to enforce the area budget
+    cost_column = "area_km2" # Cost is set to area to enforce the area budget
   ) %>%
     # Maximizes feature values strictly within your 30% area budget
     add_max_utility_objective(budget = area_budget) %>%
@@ -114,6 +114,10 @@ pa_optim<-function(pu,
   }
   
   optim_pa <- solve(pa_problem) 
+  # plot(
+  #   st_as_sf(optim_pa[, "solution_1"]), main = "Prioritization",
+  #   pal = c("grey90", "darkgreen")
+  # )
 
   return(optim_pa%>%filter(solution_1==1))
 }
@@ -189,17 +193,14 @@ select_oecm <- function(pu,
                         lulc_col = "lulc",
                         suitability_col = "oecm_suitability",
                         corePA_col = "core_pa_lulc",
-                        exclude_corePA = TRUE) {
+                        search_oecm_in = c("not protected","other protected areas")) {
   
   mode <- match.arg(mode)
   
   dat <- pu
   
-  if (exclude_corePA)
-    dat <- dat %>% filter(.data[[corePA_col]]=="other")
-  
-  # dat <- dat %>%
-  #   mutate(area = as.numeric(st_area(.)/10^6))
+
+  dat <- dat %>% filter(.data[[corePA_col]] %in% search_oecm_in )
   
   ## ---------- Global selection ----------
   if (mode == "global") {
@@ -247,19 +248,18 @@ plot_pca_map<-function(pu,
 ){
   dat <-pu
   oecm<-oecm_df
-  core_pa <- dat %>% filter(.data[[corePA_col]]!="other")
+  core_pa <- dat %>% filter(!.data[[corePA_col]] %in% c("not protected","other protected areas"))
   
-  other_pa<-dat %>% filter(.data[[corePA_col]]=="other"& class <6)
+  other_pa<-dat %>% filter(.data[[corePA_col]]=="other protected areas")
   
   oecm$pa_group <- ifelse(oecm$n_pa > 0, "Other PA (IUCN III-VI) high suitability for OECM", "High OECM suitability not protected - potential OECM")
   
   ## other pa, remove ids from OECM
-  other_pa_filt <- other_pa[!other_pa$ID %in% oecm$ID, ]
+  other_pa_filt <- other_pa[!other_pa$id %in% oecm$id, ]
   
-  other_pa_filt <- other_pa_filt[!other_pa_filt$ID %in% core_pa$ID, ]
-  other<-dat %>% filter(.data[[corePA_col]] == "other")
-  other <- other[!other$ID %in% oecm$ID, ]
-  other <- other[!other$ID %in% other_pa_filt$ID, ]
+  other_pa_filt <- other_pa_filt[!other_pa_filt$id %in% core_pa$id, ]
+  other<-dat %>% filter(.data[[corePA_col]] == "not protected")
+  other <- other[!other$id %in% other_pa_filt$id, ]
   
   stats_oecm<-oecm%>%group_by(pa_group,lulc_name)%>%summarise(area = sum(area))%>%st_drop_geometry()%>%mutate(scenario = scen)
   stats_other_pa<-other_pa_filt%>%group_by(lulc_name)%>%summarise(area = sum(area))%>%st_drop_geometry()%>%mutate(scenario = scen, pa_group = "other_pa")
@@ -311,10 +311,6 @@ plot_pca_map<-function(pu,
   list(
     plot = p,
     stats = t,
-    # stats_oecm = stats_oecm,
-    # stats_other_pa = stats_other_pa,
-    # stats_core_pa = stats_core_pa,
-    # stats_other = stats_other,
     total_area = total
   )
   

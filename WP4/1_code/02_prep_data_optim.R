@@ -7,27 +7,19 @@ library(terra)
 library(dplyr)
 library(ggplot2)
 source("WP4/1_code/wp4_functions_utils.R")
-
-
 main_dir<-"P:/312204_pareus/"
 siteID<-"FRL04"
 
-## read grid from 01_pa_status.R
-grid<-st_read(paste0("WP4/2_output/02_optim/",siteID,"_input_grid.json"))
-target_crs<-st_crs(grid)$wkt
 
-## read cost based on es
-cost_es<-terra::rast(paste0(main_dir,"WP4/cost_raster_es/",siteID,"_cost_raster_es.tif"))
-cost_policy<-terra::rast(paste0(main_dir,"WP4/cost_raster_policy/",siteID,"_cost_raster_pol.tif"))
+####---- Input and processing ----####
+## read PU from 01_pa_status.R
+grid<-st_read(paste0("WP4/2_output/01_PA_analysis/",siteID,"_input_grid.json"))
 
-#read all es_make mean es as features 1
-es_raster_files <- list.files(paste0(main_dir,"WP2/T2.2/PGIS_ES_mapping/",siteID,"/raw_data_backup/4_mean_R1"),pattern = "\\.tif$", full.names = TRUE)
-# 2. Read all rasters
-es_raster <- terra::rast(es_raster_files)
-
-
-#is the AHP and uncertainty weighted grand mean of all ES across all participants
+### Features
+## Mean ecosystem service (cookbook nr.2)
 grand_mean_es<-terra::rast(paste0(main_dir,"WP2/T2.2/PGIS_ES_mapping/",siteID,"/es_weight_mean.tif"))
+# ES groups
+es_raster <- terra::rast(list.files(paste0(main_dir,"WP2/T2.2/PGIS_ES_mapping/",siteID,"/raw_data_backup/4_mean_R1"),pattern = "\\.tif$", full.names = TRUE))
 #prov es mean
 mean_prov <- mean(es_raster[[c(3, 6, 10, 11)]])
 #cult es mean
@@ -35,68 +27,58 @@ mean_cult <- mean(es_raster[[c(1, 7, 9)]])
 #reg es mean
 mean_reg <- mean(es_raster[[c(2, 4, 5)]])
 
-## es condition as features 2
-es_cond<-paste0(main_dir,"WP4/features/",siteID,"_ec.tif")
-es_cond<-terra::rast(es_cond)
+## Ecosystem condition (cookbook nr.2)
+es_cond<-terra::rast(paste0(main_dir,"WP4/features/",siteID,"_ec.tif"))
 
+### costs
+##based on ecosystem service exclusiveness
+cost_es<-terra::rast(paste0(main_dir,"WP4/cost_raster_es/",siteID,"_cost_raster_es.tif"))
+## based on policy coherence (cookbook nr. 3)
+cost_policy<-terra::rast(paste0(main_dir,"WP4/cost_raster_policy/",siteID,"_cost_raster_pol.tif"))
 
-
+### Further features of potential interest
 ##pop (world pop cover 2020)
-pop25<-paste0(main_dir,"WP4/lock_out/pop_2025_",siteID,".tif")
-pop25<-terra::rast(pop25)
+pop25<-terra::rast(paste0(main_dir,"WP4/lock_out/pop_2025_",siteID,".tif"))
+pop30<-terra::rast(paste0(main_dir,"WP4/lock_out/pop_2030_",siteID,".tif"))
 
-pop30<-paste0(main_dir,"WP4/lock_out/pop_2030_",siteID,".tif")
-pop30<-terra::rast(pop30)
+target_crs<-st_crs(grid)$wkt
 
+rasters <- list(
+  cost_es       = cost_es,
+  cost_policy   = cost_policy,
+  grand_mean_es = grand_mean_es,
+  es_cult       = mean_cult,
+  es_reg        = mean_reg,
+  es_prov       = mean_prov,
+  pop25         = pop25,
+  pop30         = pop30,
+  eco_cond = es_cond
+)
 
+rasters <- lapply(rasters, project, y = target_crs)
 
-## transform and resample rasters
-cost_es <- project(cost_es, target_crs)
-cost_policy <- project(cost_policy, target_crs)
-grand_mean_es <- project(grand_mean_es, target_crs)
-mean_cult <- project(mean_cult, target_crs)
-mean_reg <- project(mean_reg, target_crs)
-mean_prov <- project(mean_prov, target_crs)
+list2env(rasters, envir = environment())
 
-# habitat <-project(habitat, target_crs)
+grid[paste0("sampled_", names(rasters))] <-
+  lapply(rasters, \(r)
+         terra::extract(r, grid, fun = mean, na.rm = TRUE)[, 2]
+  )
 
-pop25 <-project(pop25, target_crs)
-pop30 <-project(pop30, target_crs)
-
-## existing PA
-
-# 5. Sample mean value from each raster layer into the grid cells
-grid$sampled_es <- terra::extract(grand_mean_es, grid, fun = mean, na.rm = TRUE)[,2]
-grid$sampled_cult <- terra::extract(mean_cult, grid, fun = mean, na.rm = TRUE)[,2]
-grid$sampled_prov <- terra::extract(mean_prov, grid, fun = mean, na.rm = TRUE)[,2]
-grid$sampled_reg <- terra::extract(mean_reg, grid, fun = mean, na.rm = TRUE)[,2]
-grid$sampled_pop25 <- terra::extract(pop25, grid, fun = mean, na.rm = TRUE)[,2]
-grid$sampled_pop30 <- terra::extract(pop30, grid, fun = mean, na.rm = TRUE)[,2]
-grid$sampled_cost_es <- terra::extract(cost_es, grid, fun = mean, na.rm = TRUE)[,2]
-grid$sampled_cost_pol <- terra::extract(cost_policy, grid, fun = mean, na.rm = TRUE)[,2]
-grid$sampled_condition<- terra::extract(es_cond, grid, fun = mean, na.rm = TRUE)[,2]
-
-
-
-
-#calculate distance from cells outside core PA to core PA (IUCN Ia II)
+#calculate distance from cells outside core PA to core PA as defined in step 01_pa_status.R
 out   <- grid%>%filter(exisiting_corePA == F)
 pa_core <- grid%>%filter(exisiting_corePA == T)
-dist_matrix <- st_distance(out, pa_core)
 
-out$min_distance <- apply(dist_matrix, 1, min)
+out$min_distance <- apply(st_distance(out, pa_core), 1, min)
 pa_core$min_distance<-0
 grid<-rbind(out,pa_core)
 
-
+## remove na grid cells based on features and costs (not)
 grid_clean <- grid %>%
-  filter(!if_any(all_of(c("sampled_es","sampled_cult","sampled_prov","sampled_reg","sampled_cost_es","sampled_cost_pol","sampled_condition")), ~ is.na(.) | is.nan(.)))
-
-
+  filter(!if_any(all_of(c("sampled_grand_mean_es","sampled_es_cult","sampled_es_prov","sampled_es_reg","sampled_cost_es","sampled_cost_policy","sampled_eco_cond")), ~ is.na(.) | is.nan(.)))
 
 grid_clean<- zero_one_scale(
   grid_clean,
-  cols = c("sampled_pop25", "sampled_pop30", "sampled_es","sampled_cult","sampled_prov","sampled_reg","sampled_cost_es","sampled_condition","min_distance")
+  cols = c("sampled_pop25", "sampled_pop30", "sampled_grand_mean_es","sampled_es_cult","sampled_es_prov","sampled_es_reg","sampled_cost_es","sampled_eco_cond","min_distance")
 )
 
 
