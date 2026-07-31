@@ -123,13 +123,6 @@ pa_optim<-function(pu,
 }
 
 
-
-
-
-
-
-
-
 min_max_normalize <- function(r) {
   # Normalize each layer individually
   norm_r <- lapp(r, function(x) {
@@ -244,65 +237,59 @@ plot_pca_map<-function(pu,
                        corePA_col = "core_pa_lulc",
                        oecm_df,
                        stud_area,
-                       scen
+                       scen,
+                       save_output = F
 ){
   dat <-pu
   oecm<-oecm_df
-  core_pa <- dat %>% filter(!.data[[corePA_col]] %in% c("not protected","other protected areas"))
+  core_pa <- dat %>% filter(!.data[[corePA_col]] %in% c("not protected","other protected areas"))%>%mutate(pca = .data[[corePA_col]])
   
-  other_pa<-dat %>% filter(.data[[corePA_col]]=="other protected areas")
-  
-  oecm$pa_group <- ifelse(oecm$n_pa > 0, "Other PA (IUCN III-VI) high suitability for OECM", "High OECM suitability not protected - potential OECM")
-  
+  other_pa<-dat %>% filter(.data[[corePA_col]]=="other protected areas")%>%mutate(pca = "Other PA (IUCN III-VI)")
+
+  # oecm$pca <- ifelse(oecm$n_pa > 0, "Other PA (IUCN III-VI) high suitability for OECM", "High OECM suitability not protected - potential OECM")
+  oecm$pca <- ifelse(
+    oecm[[corePA_col]] == "other protected areas",
+    "Other PA (IUCN III-VI) high suitability for OECM",
+    "High OECM suitability not protected - potential OECM"
+  )
+
   ## other pa, remove ids from OECM
-  other_pa_filt <- other_pa[!other_pa$id %in% oecm$id, ]
+  no_oecm_pa <- other_pa[!other_pa$id %in% oecm$id, ]
   
-  other_pa_filt <- other_pa_filt[!other_pa_filt$id %in% core_pa$id, ]
-  other<-dat %>% filter(.data[[corePA_col]] == "not protected")
-  other <- other[!other$id %in% other_pa_filt$id, ]
+  other<-dat %>% filter(.data[[corePA_col]] == "not protected")%>%mutate(pca = "not protected")
+  #also here remove OECMs
+  other <- other[!other$id %in% oecm$id, ]
+
   
-  stats_oecm<-oecm%>%group_by(pa_group,lulc_name)%>%summarise(area = sum(area))%>%st_drop_geometry()%>%mutate(scenario = scen)
-  stats_other_pa<-other_pa_filt%>%group_by(lulc_name)%>%summarise(area = sum(area))%>%st_drop_geometry()%>%mutate(scenario = scen, pa_group = "other_pa")
-  stats_core_pa<-core_pa%>%group_by(lulc_name)%>%summarise(area = sum(area))%>%st_drop_geometry()%>%mutate(scenario = scen, pa_group = "core_pa")
-  stats_other<-other%>%group_by(lulc_name)%>%summarise(area = sum(area))%>%st_drop_geometry()%>%mutate(scenario = scen, pa_group = "not_protected")
+  pu_pca<-rbind(other,oecm,no_oecm_pa,core_pa)
+  pu_pca<-pu_pca%>%select(id,lulc_name, sampled_es_reg_scaled,sampled_es_prov_scaled,sampled_es_cult_scaled,sampled_grand_mean_es_scaled, sampled_eco_cond_scaled, sampled_cost_policy,connectivity_scaled,area,pca)
   
-  t<-rbind(stats_other_pa,stats_oecm,stats_core_pa,stats_other)
+  if(save_output == T){
+    st_write(pu_pca,paste0("WP4/2_output/03_pca_landscape/PCA_PU_",siteID,"_",scen,".geojson"))
+  }
+  
+  stats<-pu_pca%>%group_by(pca,lulc_name)%>%summarise(area = sum(area))%>%st_drop_geometry()%>%mutate(scenario = scen)
+
   total<-dat%>%group_by(lulc_name)%>%summarise(area = sum(area))%>%st_drop_geometry()%>%mutate(scenario = scen)
   
-  cols <- c(
-    "existing core pa" = "#00A300",
-    "new core PA" = "#bf8bff",
-    "proposed upgrade existing PA" = "#e5d0ff"
-  )
-  
+  ############
   p<-ggplot() +
     # Layer 0: other pa
-    geom_sf(data = other_pa,
-            aes(fill = "Other protected areas (IUCN III-VI)"),
-            color = NA) +
-    
-    # Layer 1: oecm (purple based on n_pa)
-    geom_sf(data = oecm,
-            aes(fill = pa_group),
+    geom_sf(data = pu_pca%>%filter(pca != "not protected"),
+            aes(fill = pca),
             color = NA) +
     scale_fill_manual(
-      values = c("Other PA (IUCN III-VI) high suitability for OECM" = "#44a6c6",
+      values = c(    "existing core pa" = "#00A300",
+                     "new core PA" = "#bf8bff",
+                     "proposed upgrade existing PA" = "#e5d0ff",
+                     "Other PA (IUCN III-VI) high suitability for OECM" = "#44a6c6",
                  "High OECM suitability not protected - potential OECM" = "#194553",
-                 "Other protected areas (IUCN III-VI)" = "#ADD8E6"),
+                 "Other PA (IUCN III-VI)" = "#ADD8E6"),
       name = NULL
     )  +
     
     new_scale_fill() +
-    
-    # Layer 2: core_pa (categorical colors)
-    geom_sf(
-      data = core_pa,
-      aes(fill = .data[[corePA_col]]),
-      color = NA
-    ) +
-    scale_fill_manual(values = cols, name = NULL, na.translate = FALSE) +
-    new_scale_fill() +
-    
+
     # stud area
     geom_sf(data = stud_area, fill = NA, color = "black") +
     theme_minimal()+
@@ -310,8 +297,9 @@ plot_pca_map<-function(pu,
   
   list(
     plot = p,
-    stats = t,
-    total_area = total
+    stats = stats,
+    total_area = total,
+    pu = pu_pca
   )
   
 }

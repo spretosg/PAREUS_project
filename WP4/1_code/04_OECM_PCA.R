@@ -40,6 +40,8 @@ pu<-zero_one_scale(
   cols = c("connectivity")
 )
 
+
+
 ####---- Linear combination for OECM suitability ----####
 ## check correlation of MCDA variables
 vars <- c("sampled_es_cult_scaled", "sampled_es_prov_scaled", "sampled_eco_cond_scaled", "connectivity_scaled")
@@ -118,25 +120,30 @@ base_lulc<-plot_pca_map(pu=pu,
              corePA_col = "core_pa_lulc",
              oecm_df=oecm_base_lulc,
              stud_area,
-             scen = "BASE_LULC")
+             scen = "BASE_LULC",
+             save_output = T)
 nat_lulc<-plot_pca_map(pu=pu,
                 corePA_col = "core_pa_lulc",
                 oecm_df=oecm_nat_lulc,
                 stud_area,
-                scen = "NAT_LULC")
+                scen = "NAT_LULC",
+                save_output = T)
 
 nat_glob<-plot_pca_map(pu=pu,
                 corePA_col = "core_pa_global",
                 oecm_df=oecm_nat_global,
                 stud_area,
-                scen = "NAT_GLOB")
+                scen = "NAT_GLOB",
+                save_output = T)
 
 
 base_glob<-plot_pca_map(pu=pu,
                 corePA_col = "core_pa_global",
                 oecm_df=oecm_base_global,
                 stud_area,
-                scen = "BASE_GLOB")
+                scen = "BASE_GLOB",
+                save_output = T)
+st_write(pu,paste0("WP4/2_output/03_pca_landscape/PCA_final",siteID,".geojson"))
 
 stats_all<-rbind(base_lulc$stats,nat_lulc$stats,nat_glob$stats, base_glob$stats)
 stats_all$pa_group[stats_all$pa_group == "Other PA (IUCN III-VI) high suitability for OECM"] <- "other_pa"
