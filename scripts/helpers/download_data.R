@@ -1,38 +1,30 @@
 library(readr)
+library(dataverse)
 
-catalogues <- list.files(
-  "data",
-  pattern = "datasets.csv",
-  recursive = TRUE,
-  full.names = TRUE
-)
+Sys.setenv(DATAVERSE_SERVER = "dataverse.harvard.edu")
 
-for(cat in catalogues){
+catalogue <- read.csv("data_catalogue.csv", sep=";")
+
+for (k in seq_len(nrow(catalogue))) {
   
-  message("Reading ", cat)
+  message("Downloading ", catalogue$WP[k])
   
-  db <- read_csv(cat, show_col_types = FALSE)
+  ds <- get_dataset(catalogue$DOI[k])
   
-  folder <- dirname(cat)
+  dir.create(catalogue$Destination[k],
+             recursive = TRUE,
+             showWarnings = FALSE)
   
-  for(i in seq_len(nrow(db))){
+  for (i in seq_len(nrow(ds$files))) {
     
-    outfile <- file.path(folder, db$filename[i])
+    raw <- get_file(ds$files$id[i])
     
-    if(file.exists(outfile)){
-      
-      message("  ✓ ", db$filename[i])
-      
-      next
-      
-    }
-    
-    download.file(
-      db$url[i],
-      outfile,
-      mode = "wb"
+    writeBin(
+      raw,
+      file.path(
+        catalogue$Destination[k],
+        ds$files$label[i]
+      )
     )
-    
   }
-  
 }

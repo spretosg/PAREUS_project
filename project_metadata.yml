@@ -66,6 +66,18 @@ work_packages:
     repository: https://github.com/spretosg/PAREUS_project/WP4
     data: https://doi.org/10.xxxx/wp3
     lead: Reto Spielhofer
+    
+  - id: WP5
+    title: Synthesizing PCA landscapes for sustainability
+    repository: https://github.com/spretosg/PAREUS_project/WP5
+    data: https://doi.org/10.xxxx/wp3
+    lead: Philip Roche
+    
+  - id: WP6
+    title: Coordination of National Case Studies
+    repository: https://github.com/spretosg/PAREUS_project/WP4
+    data: https://doi.org/10.xxxx/wp3
+    lead: Robert Kanka
 
 shared_resources:
   datasets:
