@@ -1,0 +1,11 @@
+cff-version: 1.2.0
+title: "PAREUS Workflow"
+message: "If you use, modify or adapt this workflow, please cite it."
+authors:
+  - family-names: Spielhofer
+    given-names: Reto
+orcid: https://orcid.org/0000-0002-0943-779X
+
+license: MIT
+
+repository-code: https://github.com/PAREUS_project
