@@ -459,8 +459,8 @@ workflow and processes Outputs: Project outputs organised by work
 package such as maps, figures and cookbooks —</p>
 </div>
 </div>
-<div id="work-packages" class="section level1">
-<h1>Work packages</h1>
+<div id="project-organization" class="section level1">
+<h1>Project organization</h1>
 <table>
 <colgroup>
 <col width="7%" />
@@ -485,75 +485,89 @@ package such as maps, figures and cookbooks —</p>
 <td>WP1</td>
 <td>Co-creating transformative PCA landscapes</td>
 <td>Sigrid Engen (NINA)</td>
-<td>GitHub</td>
-<td>DOI</td>
-<td>Link</td>
+<td></td>
+<td></td>
+<td></td>
 </tr>
 <tr class="even">
 <td>WP2</td>
 <td>Mapping and accounting of social-ecological PCA landscapes</td>
 <td>Philip Roche (INRAE)</td>
-<td>GitHub</td>
-<td>DOI</td>
-<td>Link</td>
+<td></td>
+<td></td>
+<td></td>
 </tr>
 <tr class="odd">
 <td>WP3</td>
 <td>Evaluating policies for PCA landscapes</td>
 <td>Robert Kanka (ILESAS)</td>
 <td>GitHub</td>
-<td>DOI</td>
-<td>Link</td>
+<td></td>
+<td></td>
 </tr>
 <tr class="even">
 <td>WP4</td>
 <td>Developing the geoprospective PCA landscape tool</td>
 <td>Reto Spielhofer (NINA)</td>
-<td>GitHub</td>
-<td>DOI</td>
-<td>Link</td>
+<td></td>
+<td></td>
+<td></td>
 </tr>
 <tr class="odd">
 <td>WP5</td>
 <td>Synthesizing PCA landscapes for sustainability</td>
 <td>Philip Roche (INRAE)</td>
-<td>GitHub</td>
-<td>DOI</td>
-<td>Link</td>
+<td></td>
+<td></td>
+<td></td>
 </tr>
 <tr class="even">
 <td>WP6</td>
 <td>Coordination of National Case Studies</td>
 <td>Robert Kanka (ILESAS)</td>
-<td>GitHub</td>
-<td>DOI</td>
-<td>Link</td>
+<td></td>
+<td></td>
+<td></td>
 </tr>
 </tbody>
 </table>
+<div id="dependencies" class="section level2">
+<h2>Dependencies</h2>
+<p>WP2 develops spatially explicit data for ecosystem condition and
+ecosystem services WP3 analyses and maps policy coherence in the study
+area WP4 takes ecosystem condition, ecosystem services and policy
+coherence together with protected area information and optimizes
+protected areas within the case study.</p>
 <hr />
 </div>
-<div id="shared-resources" class="section level1">
-<h1>Shared resources</h1>
-<p>Datasets</p>
+</div>
+<div id="get-started" class="section level1">
+<h1>Get started</h1>
+<ol style="list-style-type: decimal">
+<li><p>Clone this repository.</p></li>
+<li><p>Run the project setup script:</p>
+<pre class="r"><code>source(&quot;scripts/00_setup.R&quot;)</code></pre>
+<p>The setup script:</p>
 <ul>
-<li>National DEM</li>
-<li>Land cover</li>
-<li>Administrative boundaries</li>
-<li>Climate data</li>
-</ul>
-<p>Software</p>
+<li>restores the project R environment (if using
+<code>renv</code>),</li>
+<li>downloads all required input datasets from Dataverse,</li>
+<li>verifies downloaded files,</li>
+<li>and creates the local directory structure for intermediate data
+products.</li>
+</ul></li>
+<li><p>Explore the project by either:</p>
 <ul>
-<li>Shared R packages</li>
-<li>Shared Python utilities</li>
-</ul>
-<p>Standards</p>
-<ul>
-<li>Coordinate reference system</li>
-<li>Naming conventions</li>
-<li>Metadata standard</li>
-<li>Coding guidelines</li>
-</ul>
+<li>reviewing the final products and outputs of each work package (WP),
+or</li>
+<li>reproducing the analyses by running the workflow scripts using the
+downloaded input data.</li>
+</ul></li>
+<li><p>Consult the work package cookbooks in <code>docs/</code> for
+detailed descriptions of the workflows, data processing steps,
+assumptions, and methods used to generate the input data and final
+products.</p></li>
+</ol>
 <hr />
 <div id="data-access" class="section level2">
 <h2>Data access</h2>

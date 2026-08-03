@@ -36,10 +36,6 @@ cost_es<-terra::rast(paste0(main_dir,"WP4/cost_raster_es/",siteID,"_cost_raster_
 ## based on policy coherence (cookbook nr. 3)
 cost_policy<-terra::rast(paste0(main_dir,"WP4/cost_raster_policy/",siteID,"_cost_raster_pol.tif"))
 
-### Further features of potential interest
-##pop (world pop cover 2020)
-pop25<-terra::rast(paste0(main_dir,"WP4/lock_out/pop_2025_",siteID,".tif"))
-pop30<-terra::rast(paste0(main_dir,"WP4/lock_out/pop_2030_",siteID,".tif"))
 
 target_crs<-st_crs(grid)$wkt
 
@@ -50,8 +46,6 @@ rasters <- list(
   es_cult       = mean_cult,
   es_reg        = mean_reg,
   es_prov       = mean_prov,
-  pop25         = pop25,
-  pop30         = pop30,
   eco_cond = es_cond
 )
 
@@ -78,7 +72,7 @@ grid_clean <- grid %>%
 
 grid_clean<- zero_one_scale(
   grid_clean,
-  cols = c("sampled_pop25", "sampled_pop30", "sampled_grand_mean_es","sampled_es_cult","sampled_es_prov","sampled_es_reg","sampled_cost_es","sampled_eco_cond","min_distance")
+  cols = c("sampled_grand_mean_es","sampled_es_cult","sampled_es_prov","sampled_es_reg","sampled_cost_es","sampled_eco_cond","min_distance")
 )
 
 

@@ -61,40 +61,46 @@ Docs: Documentation for each work package including method, workflow and process
 Outputs: Project outputs organised by work package such as maps, figures and cookbooks
 ---
 
-# Work packages
+# Project organization
 
 | WP | Description | Lead | Repository | Data | Documentation |
 |----|-------------|------|------------|------|---------------|
-| WP1 | Co-creating transformative PCA landscapes | Sigrid Engen (NINA) | GitHub | DOI | Link |
-| WP2 | Mapping and accounting of social-ecological PCA landscapes | Philip Roche (INRAE) | GitHub | DOI | Link |
-| WP3 | Evaluating policies for PCA landscapes | Robert Kanka (ILESAS) | GitHub | DOI | Link |
-| WP4 | Developing the geoprospective PCA landscape tool| Reto Spielhofer (NINA) | GitHub | DOI | Link |
-| WP5 | Synthesizing PCA landscapes for sustainability | Philip Roche (INRAE) | GitHub | DOI | Link |
-| WP6 | Coordination of National Case Studies | Robert Kanka (ILESAS) | GitHub | DOI | Link |
+| WP1 | Co-creating transformative PCA landscapes | Sigrid Engen (NINA) | 
+| WP2 | Mapping and accounting of social-ecological PCA landscapes | Philip Roche (INRAE) | 
+| WP3 | Evaluating policies for PCA landscapes | Robert Kanka (ILESAS) | GitHub | 
+| WP4 | Developing the geoprospective PCA landscape tool| Reto Spielhofer (NINA) | 
+| WP5 | Synthesizing PCA landscapes for sustainability | Philip Roche (INRAE) | 
+| WP6 | Coordination of National Case Studies | Robert Kanka (ILESAS) |
+
+## Dependencies
+WP2 develops spatially explicit data for ecosystem condition and ecosystem services
+WP3 analyses and maps policy coherence in the study area
+WP4 takes ecosystem condition, ecosystem services and policy coherence together with protected area information and optimizes protected areas within the case study.
 
 ---
 
 
-# Shared resources
+# Get started
 
-Datasets
+1. Clone this repository.
 
-- National DEM
-- Land cover
-- Administrative boundaries
-- Climate data
+2. Run the project setup script:
 
-Software
+   ```r
+   source("scripts/00_setup.R")
+   ```
 
-- Shared R packages
-- Shared Python utilities
+   The setup script:
+   - restores the project R environment (if using `renv`),
+   - downloads all required input datasets from Dataverse,
+   - verifies downloaded files,
+   - and creates the local directory structure for intermediate data products.
 
-Standards
+3. Explore the project by either:
+   - reviewing the final products and outputs of each work package (WP), or
+   - reproducing the analyses by running the workflow scripts using the downloaded input data.
 
-- Coordinate reference system
-- Naming conventions
-- Metadata standard
-- Coding guidelines
+4. Consult the work package cookbooks in `docs/` for detailed descriptions of the workflows, data processing steps, assumptions, and methods used to generate the input data and final products.
 
 ---
 
