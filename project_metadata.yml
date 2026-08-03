@@ -1,0 +1,89 @@
+project:
+  title: "Providing Adaptive knowledge for Ratcheting up the EU Biodiversity strategy for Sustainable landscapes and protected areas"
+  acronym: PAREUS
+  version: "1.0"
+  status: Active
+
+description:
+  summary: >
+    PAREUS will provide insight into consequences of land-use development and planning practice effectiveness for conservation-restoration prioritization, and visualizing pathways for integrated approaches for sustainable landscapes.
+
+funding:
+  funder: Research Council of Norway
+  grant_number: "123456"
+
+organisation:
+  lead:
+    name: Norwegian Institute for Nature Research (NINA)
+  collaborators:
+    - INRAE
+    - ILE SAS
+
+contacts:
+  project_lead:
+    name: Roel May
+    email: roel.may@nina.no
+  technical_contact:
+    name: Reto Spielhofer
+    email: reto.spielhofer@nina.no
+
+time:
+  start: 2023-01-01
+  end: 2026-12-31
+
+license:
+  code: MIT
+  documentation: CC-BY-4.0
+  data: CC-BY-4.0
+
+repository:
+  github: https://github.com/spretosg/PAREUS_project
+
+website:
+  homepage: https://www.nina.no/en/our-research/all-projects/pareus
+
+work_packages:
+  - id: WP1
+    title: Co-creating transformative PCA landscapes
+    repository: https://github.com/spretosg/PAREUS_project/WP1
+    data: https://doi.org/10.xxxx/wp1
+    lead: Sigrid Engen
+
+  - id: WP2
+    title: Mapping and accounting of social-ecological PCA landscapes
+    repository: https://github.com/spretosg/PAREUS_project/WP2
+    data: https://doi.org/10.xxxx/wp2
+    lead: Philip Roche
+
+  - id: WP3
+    title: Evaluating policies for PCA landscapes
+    repository: https://github.com/spretosg/PAREUS_project/WP3
+    data: https://doi.org/10.xxxx/wp3
+    lead: Robert Kanka
+    
+  - id: WP4
+    title: Developing the geoprospective PCA landscape tool
+    repository: https://github.com/spretosg/PAREUS_project/WP4
+    data: https://doi.org/10.xxxx/wp3
+    lead: Reto Spielhofer
+
+shared_resources:
+  datasets:
+    - Project study areas
+    - CORINE land use land cover
+
+  software:
+    - R 4.5
+
+keywords:
+  - ecosystem services
+  - ecosystem condition
+  - protected areas
+  - OECM
+  - policy analysis
+  - spatial planning
+  - GIS
+
+publications:
+  - doi: 10.xxxx/xxxx
+  - doi: 10.xxxx/yyyy

@@ -1,0 +1,202 @@
+/***
+
+This script provides the land use and condition statistics (or other input indicator) for an input zone.
+
+
+*Input* : 
+Geometry of a region & ecosystem condition index statistics
+
+All data to change is in section "Imports of the layers"
+
+- GEOMETRY OF THE ZONE OF INTEREST -
+
+For example
+Study zone : ee.FeatureCollection('FAO/GAUL/2015/level1').filter(ee.Filter.eq('ADM1_CODE', 1269)).first()).geometry()
+PA network : ee.FeatureCollection('WCMC/WDPA/202502/polygons').filterBounds(study_zone).filter(ee.Filter.eq('ISO3', 'FRA'))
+Negative of the PA network on the study zone : study_zone.difference(PA_network)
+
+- ECOSYSTEM CONDITION INDEX LAYER -
+
+The condition layer should be the same size or bigger than the geometry.
+Use EC_State_V12Buffer_1km to extract the condition layer
+
+
+*Output* : 
+Table with :
+- some statistics (from "dataset" - a raster; resampled according to lulc), here it is the ecosystem condition index
+- for each land cover class ("lulc" - a raster with classes)
+- in an area of interest ("region" - a feature or feature collection)
+
+Stats are sent as a table to Drive.
+Each class is a row (className is the first column).
+Column give the statistics for each class.
+
+By default,
+- the "AnalyzeScale" is the resolution of the LULC file
+- the statistics to extract are defined in the dictionary "reducersDict"
+
+This script also provide an histogram of the condition index on the zone, with statistics for the whole zone.
+
+***/
+
+///////////////////////////
+// Imports of the layers //
+///////////////////////////
+
+// Complete with your study zone
+var study_zone = ee.Feature(ee.FeatureCollection('FAO/GAUL/2015/level2')
+  .filter(ee.Filter.eq('ADM2_CODE', 16322)).first()).geometry() ;
+// Do not forget to change the name (for export)
+var study_zone_name = 'BoucheDuRhone' ;
+
+// The ecosystem condition index layer
+var dataset = ee.Image(image).clip(study_zone); 
+// Do not forget to change the name (for export)
+var indicator_name = 'cond_v12' ; 
+
+// Land-use land-cover layer
+var lulc = ee.Image("COPERNICUS/CORINE/V20/100m/2018").select('landcover').clip(study_zone);
+
+//////////////////////////////////////
+// Statistics computing by land use //
+//////////////////////////////////////
+  
+// Resampling
+var AnalyzeScale = lulc.projection().nominalScale();
+var resampledData = dataset.reproject({crs:lulc.projection(), scale:AnalyzeScale});
+
+// Reducer for statistics
+var reducersDict = ee.Dictionary({ // to link names and function of reducers (change this list to change the stats to export)
+  'mean': ee.Reducer.mean(),
+  'stdDev': ee.Reducer.stdDev(),
+  'median' : ee.Reducer.median(),
+  'min': ee.Reducer.min(),
+  'max': ee.Reducer.max(),
+  'p25': ee.Reducer.percentile([25]),
+  'p75': ee.Reducer.percentile([75])
+});
+
+// Combine the reducers
+var statsNames = reducersDict.keys();
+var reducersList = reducersDict.values();
+
+var function_reducers_combination = function(currentReducer, previousComb) {
+  return ee.Reducer(previousComb).combine({reducer2: currentReducer, sharedInputs: true});
+};
+var reducers = reducersList.get(0); // initialization
+var reducers = reducersList.slice(1) // to remove the first, already in reducers
+                .iterate(function_reducers_combination, reducers);
+  
+// LULC CLASS LIST 
+// and area of each class IN ZONE
+var lulc_masked = lulc.mask(lulc.add(dataset));
+
+var nbPixelsClasses = ee.Dictionary(lulc_masked.reduceRegion({
+   reducer: ee.Reducer.frequencyHistogram(),
+   geometry: study_zone,
+   scale: AnalyzeScale,
+   maxPixels: 1e9
+}).get('landcover'));
+var listClasses = nbPixelsClasses.keys();
+  
+  // Calculate area per class (in hectares)
+var classesArea = nbPixelsClasses.map(function(key, value){
+  return ee.Number(value).multiply(AnalyzeScale.multiply(AnalyzeScale)).divide(10000); // convert in hectares
+}); 
+var totalPixels = nbPixelsClasses.values().reduce(ee.Reducer.sum());
+
+// MASK DATA PER CLASS
+// Use listClasses to get a list of images, each image being the input data raster masked by one lulc class.
+  
+// Function to mask data image with 1 lulc class
+var function_datamask_perclass = function(classValue_str) {
+  var classValue = ee.Number.parse(classValue_str);
+  var mask = lulc.eq(classValue);
+  var maskedPerClassData = resampledData.updateMask(mask);
+   return maskedPerClassData.rename([classValue_str]);
+};
+  
+// Map over the classes to create masked bands & convert to list of images
+var maskedPerClassData_list = listClasses.map(function_datamask_perclass);
+  
+// CALCULATE STATS
+
+// Map over each image in list to get a list of features with statistics properties
+var multiStats_list = maskedPerClassData_list.map(function(img){
+  var dict_properties = ee.Image(img).reduceRegion({
+    reducer: reducers,
+    geometry: study_zone,
+    scale: AnalyzeScale,
+    maxPixels: 1e9
+  });
+  var names_dict = dict_properties.keys();
+  var renamed_dict = dict_properties.rename(names_dict,statsNames);
+  var className = ee.String(ee.Image(img).bandNames().get(0));
+  var complete_dict = renamed_dict.set('LULC_class',className)
+                                  .set('LULC_area_in_zone_ha', classesArea.get(className))
+                                  .set('Variable', indicator_name);
+  return ee.Feature(null, complete_dict)});
+
+// EXPORT TO DRIVE
+
+var Stats_flattened = multiStats_list.flatten();
+var Stats_FC = ee.FeatureCollection(Stats_flattened);
+print('Result : stat of condition for every type of habitat in region ', Stats_FC);
+
+var file_name = 'stats_'+indicator_name+'_'+study_zone_name;
+
+Export.table.toDrive({
+  collection: Stats_FC,
+  description: file_name,
+  fileFormat: 'CSV',
+  folder: 'PAREUS',
+  fileNamePrefix: file_name
+});
+
+///////////////////
+// Vizualisation //
+///////////////////
+
+var visParams = {
+      min: 0,
+      max: 1,
+      palette: ['red', 'yellow', 'green']
+    };
+
+Map.centerObject(dataset,7.5);
+Map.addLayer(dataset,visParams);
+
+///////////////////////////////////////
+// Some statistics on the whole zone //
+///////////////////////////////////////
+
+// Histogram of condition
+
+var histogram = ui.Chart.image.histogram({
+  image: dataset,
+  region: study_zone, 
+  scale: 200,
+  maxBuckets : 20 })
+  .setOptions({
+  title: indicator_name+ ' on ' +study_zone_name
+});
+
+print(histogram);
+
+
+// Statistics on the whole zone
+
+var stats = dataset.reduceRegion({
+  reducer: ee.Reducer.mean()
+            .combine({reducer2: ee.Reducer.stdDev(), sharedInputs: true})
+            .combine({reducer2: ee.Reducer.minMax(), sharedInputs: true})
+            .combine({reducer2: ee.Reducer.median(),sharedInputs: true})
+            .combine({reducer2: ee.Reducer.percentile([25]), sharedInputs: true})
+            .combine({reducer2: ee.Reducer.percentile([75]), sharedInputs: true}),
+  geometry: study_zone,  
+  scale: 10,
+  bestEffort: true
+});
+
+// Afficher les résultats
+print('Statistics of ' +indicator_name+ ' on ' +study_zone_name+ ' :', stats);

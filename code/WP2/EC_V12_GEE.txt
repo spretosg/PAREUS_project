@@ -1,0 +1,1278 @@
+///////////////////////////////////////////////////////////////////
+// ECOSYSTEM CONDITION STATE INDEX V10 - Buffered version /////////
+// Original Author: Philip Roche, INRAE, April 2025       /////////
+// Modified for better performance with large areas       /////////
+///////////////////////////////////////////////////////////////////
+
+///////////////////////
+// 1. IMPORTS & UI  //
+///////////////////////
+var selectionModule = require('users/pkdroche/PAREUS:RegionSelect_V2');
+selectionModule.initSelectionUI();
+
+/////////////////////////////
+// 2. CONSTANTS & CONFIGS  //
+/////////////////////////////
+// Buffer and simplification distances
+var BUFFER_DISTANCE = 1000; // meters
+var SIMPLIFY_TOLERANCE = 100; // mild simplification (m)
+var MILD_SIMPLIFICATION = 1000; // for computation (m)
+var ANALYZE_SCALE = 100; // default scale (m)
+var SCALE_THRESHOLD = 40000; // km²  - anything above this is considered 'large'
+var isLargeAreaValue = false; 
+
+  ////////////////////////////////
+  // GLOBAL ANCHORS DEFINITION //
+  ////////////////////////////////
+  var globalAnchors = ee.Dictionary({
+    // Tree Cover (10) - Highest SOC storage among vegetation types
+    '10001': {evi: {lower: 0.3, upper: 0.8}, soc: {lower: 20, upper: 150}},     // Alpine
+    '10002': {evi: {lower: 0.2, upper: 0.7}, soc: {lower: 20, upper: 140}},     // Anatolian
+    '10003': {evi: {lower: 0.2, upper: 0.7}, soc: {lower: 20, upper: 160}},     // Arctic
+    '10004': {evi: {lower: 0.4, upper: 0.9}, soc: {lower: 20, upper: 180}},     // Atlantic
+    '10005': {evi: {lower: 0.3, upper: 0.85}, soc: {lower: 20, upper: 90}},    // Black Sea
+    '10006': {evi: {lower: 0.3, upper: 0.8}, soc: {lower: 40, upper: 260}},     // Boreal
+    '10007': {evi: {lower: 0.35, upper: 0.85}, soc: {lower: 20, upper: 130}},   // Continental
+    '10008': {evi: {lower: 0.35, upper: 0.85}, soc: {lower: 20, upper: 160}},   // Macaronesian
+    '10009': {evi: {lower: 0.25, upper: 0.75}, soc: {lower: 20, upper: 140}},   // Mediterranean
+    '10010': {evi: {lower: 0.3, upper: 0.8}, soc: {lower: 10, upper: 150}},     // Outside Europe
+    '10011': {evi: {lower: 0.3, upper: 0.8}, soc: {lower: 20, upper: 130}},     // Pannonian
+    '10012': {evi: {lower: 0.25, upper: 0.75}, soc: {lower: 10, upper: 80}},   // Steppic
+    // Grassland (30) - Generally second highest carbon storage among vegetated systems
+    '30001': {evi: {lower: 0.15, upper: 0.65}, soc: {lower: 20, upper: 130}},   // Alpine
+    '30002': {evi: {lower: 0.08, upper: 0.45}, soc: {lower: 20, upper: 100}},   // Anatolian
+    '30003': {evi: {lower: 0.1, upper: 0.5}, soc: {lower: 20, upper: 200}},     // Arctic
+    '30004': {evi: {lower: 0.25, upper: 0.75}, soc: {lower: 20, upper: 150}},   // Atlantic
+    '30005': {evi: {lower: 0.2, upper: 0.7}, soc: {lower: 20, upper: 130}},     // Black Sea
+    '30006': {evi: {lower: 0.15, upper: 0.6}, soc: {lower: 40, upper: 230}},    // Boreal
+    '30007': {evi: {lower: 0.2, upper: 0.7}, soc: {lower: 20, upper: 120}},     // Continental
+    '30008': {evi: {lower: 0.25, upper: 0.75}, soc: {lower: 20, upper: 140}},   // Macaronesian
+    '30009': {evi: {lower: 0.1, upper: 0.7}, soc: {lower: 20, upper: 120}},     // Mediterranean
+    '30010': {evi: {lower: 0.15, upper: 0.65}, soc: {lower: 20, upper: 135}},   // Outside Europe
+    '30011': {evi: {lower: 0.15, upper: 0.65}, soc: {lower: 20, upper: 100}},   // Pannonian
+    '30012': {evi: {lower: 0.1, upper: 0.7}, soc: {lower: 20, upper: 70}},     // Steppic
+    // Shrubland (20) - Generally lower carbon storage than grasslands
+    '20001': {evi: {lower: 0.2, upper: 0.6}, soc: {lower: 20, upper: 90}},     // Alpine
+    '20002': {evi: {lower: 0.1, upper: 0.45}, soc: {lower: 25, upper: 90}},     // Anatolian
+    '20003': {evi: {lower: 0.15, upper: 0.5}, soc: {lower: 40, upper: 110}},    // Arctic
+    '20004': {evi: {lower: 0.3, upper: 0.7}, soc: {lower: 20, upper: 110}},     // Atlantic
+    '20005': {evi: {lower: 0.25, upper: 0.65}, soc: {lower: 20, upper: 60}},   // Black Sea
+    '20006': {evi: {lower: 0.2, upper: 0.6}, soc: {lower: 40, upper: 145}},     // Boreal
+    '20007': {evi: {lower: 0.25, upper: 0.65}, soc: {lower: 20, upper: 100}},   // Continental
+    '20008': {evi: {lower: 0.3, upper: 0.7}, soc: {lower: 35, upper: 120}},     // Macaronesian
+    '20009': {evi: {lower: 0.15, upper: 0.5}, soc: {lower: 20, upper: 90}},     // Mediterranean
+    '20010': {evi: {lower: 0.2, upper: 0.6}, soc: {lower: 35, upper: 120}},     // Outside Europe
+    '20011': {evi: {lower: 0.2, upper: 0.6}, soc: {lower: 20, upper: 90}},     // Pannonian
+    '20012': {evi: {lower: 0.15, upper: 0.5}, soc: {lower: 20, upper: 60}},    // Steppic
+    // Cropland (40) - Typically lower carbon storage than natural vegetation
+    '40001': {evi: {lower: 0.15, upper: 0.65}, soc: {lower: 20, upper: 100}},   // Alpine
+    '40002': {evi: {lower: 0.1, upper: 0.5}, soc: {lower: 20, upper: 70}},      // Anatolian
+    '40003': {evi: {lower: 0.1, upper: 0.5}, soc: {lower: 30, upper: 90}},      // Arctic
+    '40004': {evi: {lower: 0.2, upper: 0.7}, soc: {lower: 20, upper: 120}},     // Atlantic
+    '40005': {evi: {lower: 0.15, upper: 0.65}, soc: {lower: 20, upper: 80}},   // Black Sea
+    '40006': {evi: {lower: 0.15, upper: 0.6}, soc: {lower: 40, upper: 190}},    // Boreal
+    '40007': {evi: {lower: 0.2, upper: 0.7}, soc: {lower: 20, upper: 100}},     // Continental
+    '40008': {evi: {lower: 0.2, upper: 0.7}, soc: {lower: 30, upper: 100}},     // Macaronesian
+    '40009': {evi: {lower: 0.15, upper: 0.6}, soc: {lower: 10, upper: 100}},     // Mediterranean
+    '40010': {evi: {lower: 0.15, upper: 0.65}, soc: {lower: 10, upper: 100}},   // Outside Europe
+    '40011': {evi: {lower: 0.15, upper: 0.65}, soc: {lower: 20, upper: 90}},   // Pannonian
+    '40012': {evi: {lower: 0.1, upper: 0.55}, soc: {lower: 10, upper: 60}},     // Steppic
+    // Bare/sparse vegetation (60)
+    '60001': {evi: {lower: 0.00, upper: 0.2}, soc: {lower: 20, upper: 100}},     // Alpine
+    '60002': {evi: {lower: 0.00, upper: 0.2}, soc: {lower: 15, upper: 60}},     // Anatolian
+    '60003': {evi: {lower: 0.00, upper: 0.2}, soc: {lower: 40, upper: 120}},    // Arctic
+    '60004': {evi: {lower: 0.0, upper: 0.3}, soc: {lower: 20, upper: 130}},     // Atlantic
+    '60005': {evi: {lower: 0.00, upper: 0.3}, soc: {lower: 20, upper: 70}},     // Black Sea
+    '60006': {evi: {lower: 0.00, upper: 0.2}, soc: {lower: 40, upper: 200}},    // Boreal
+    '60007': {evi: {lower: 0.00, upper: 0.3}, soc: {lower: 20, upper: 100}},     // Continental
+    '60008': {evi: {lower: 0.0, upper: 0.35}, soc: {lower: 20, upper: 120}},     // Macaronesian
+    '60009': {evi: {lower: 0.00, upper: 0.2}, soc: {lower: 20, upper: 100}},    // Mediterranean
+    '60010': {evi: {lower: 0.00, upper: 0.3}, soc: {lower: 20, upper: 135}},     // Outside Europe
+    '60011': {evi: {lower: 0.00, upper: 0.2}, soc: {lower: 20, upper: 80}},     // Pannonian
+    '60012': {evi: {lower: 0.00, upper: 0.2}, soc: {lower: 20, upper: 60}},    // Steppic
+    // Built-up (50) - Lowest carbon storage among terrestrial systems
+    '50001': {evi: {lower: -0.05, upper: 0.7}, soc: {lower: 0, upper: 45}},      // Alpine
+    '50002': {evi: {lower: -0.05, upper: 0.7}, soc: {lower: 0, upper: 35}},      // Anatolian
+    '50003': {evi: {lower: -0.05, upper: 0.7}, soc: {lower: 0, upper: 40}},      // Arctic
+    '50004': {evi: {lower: -0.05, upper: 0.8}, soc: {lower: 0, upper: 50}},      // Atlantic
+    '50005': {evi: {lower: -0.05, upper: 0.8}, soc: {lower: 0, upper: 45}},      // Black Sea
+    '50006': {evi: {lower: -0.05, upper: 0.7}, soc: {lower: 0, upper: 55}},      // Boreal
+    '50007': {evi: {lower: -0.05, upper: 0.8}, soc: {lower: 0, upper: 50}},      // Continental
+    '50008': {evi: {lower: -0.05, upper: 0.8}, soc: {lower: 0, upper: 45}},      // Macaronesian
+    '50009': {evi: {lower: -0.05, upper: 0.7}, soc: {lower: 0, upper: 35}},      // Mediterranean
+    '50010': {evi: {lower: -0.05, upper: 0.8}, soc: {lower: 0, upper: 45}},      // Outside Europe
+    '50011': {evi: {lower: -0.05, upper: 0.7}, soc: {lower: 0, upper: 45}},      // Pannonian
+    '50012': {evi: {lower: -0.05, upper: 0.7}, soc: {lower: 0, upper: 35}},      // Steppic
+    // Wetland (95) - Highest overall SOC storage
+    '95001': {evi: {lower: 0.2, upper: 0.7}, soc: {lower: 30, upper: 120}},     // Alpine
+    '95002': {evi: {lower: 0.15, upper: 0.55}, soc: {lower: 60, upper: 90}},    // Anatolian
+    '95003': {evi: {lower: 0.15, upper: 0.6}, soc: {lower: 70, upper: 200}},    // Arctic
+    '95004': {evi: {lower: 0.3, upper: 0.8}, soc: {lower: 30, upper: 140}},     // Atlantic
+    '95005': {evi: {lower: 0.25, upper: 0.75}, soc: {lower: 20, upper: 150}},   // Black Sea
+    '95006': {evi: {lower: 0.2, upper: 0.7}, soc: {lower: 50, upper: 210}},     // Boreal
+    '95007': {evi: {lower: 0.25, upper: 0.75}, soc: {lower: 20, upper: 90}},    // Continental
+    '95008': {evi: {lower: 0.3, upper: 0.8}, soc: {lower: 20, upper: 150}},     // Macaronesian
+    '95009': {evi: {lower: 0.2, upper: 0.6}, soc: {lower: 20, upper: 110}},     // Mediterranean
+    '95010': {evi: {lower: 0.2, upper: 0.7}, soc: {lower: 20, upper: 150}},     // Outside Europe
+    '95011': {evi: {lower: 0.2, upper: 0.7}, soc: {lower: 20, upper: 100}},      // Pannonian
+    '95012': {evi: {lower: 0.15, upper: 0.6}, soc: {lower: 20, upper: 80}},     // Steppic
+    // Snow and Ice (70) - Low EVI and Low SOC
+    '70001': {evi: {lower: -0.2, upper: 0.3}, soc: {lower: 0, upper: 60}},      // Alpine
+    '70002': {evi: {lower: -0.2, upper: 0.3}, soc: {lower: 0, upper: 80}},      // Anatolian
+    '70003': {evi: {lower: -0.2, upper: 0.2}, soc: {lower: 0, upper: 100}},     // Arctic
+    '70004': {evi: {lower: -0.2, upper: 0.3}, soc: {lower: 0, upper: 80}},      // Atlantic
+    '70005': {evi: {lower: -0.2, upper: 0.3}, soc: {lower: 0, upper: 80}},      // Black Sea
+    '70006': {evi: {lower: -0.2, upper: 0.2}, soc: {lower: 0, upper: 100}},     // Boreal
+    '70007': {evi: {lower: -0.2, upper: 0.3}, soc: {lower: 0, upper: 60}},      // Continental
+    '70008': {evi: {lower: -0.2, upper: 0.3}, soc: {lower: 0, upper: 60}},      // Macaronesian
+    '70009': {evi: {lower: -0.2, upper: 0.3}, soc: {lower: 0, upper: 50}},      // Mediterranean
+    '70010': {evi: {lower: -0.2, upper: 0.3}, soc: {lower: 0, upper: 80}},      // Outside Europe
+    '70011': {evi: {lower: -0.2, upper: 0.3}, soc: {lower: 0, upper: 60}},      // Pannonian
+    '70012': {evi: {lower: -0.2, upper: 0.3}, soc: {lower: 0, upper: 50}},      // Steppic
+    // Moss and Lichens (100) - Low EVI and Low SOC
+    '100001': {evi: {lower: 0.05, upper: 0.3}, soc: {lower: 20, upper: 100}},     // Alpine
+    '100002': {evi: {lower: 0.1, upper: 0.4}, soc: {lower: 40, upper: 100}},     // Anatolian
+    '100003': {evi: {lower: 0.02, upper: 0.2}, soc: {lower: 30, upper: 120}},    // Arctic
+    '100004': {evi: {lower: 0.15, upper: 0.5}, soc: {lower: 50, upper: 120}},    // Atlantic
+    '100005': {evi: {lower: 0.1, upper: 0.4}, soc: {lower: 30, upper: 100}},     // Black Sea
+    '100006': {evi: {lower: 0.05, upper: 0.3}, soc: {lower: 40, upper: 130}},    // Boreal
+    '100007': {evi: {lower: 0.1, upper: 0.4}, soc: {lower: 30, upper: 90}},      // Continental
+    '100008': {evi: {lower: 0.2, upper: 0.6}, soc: {lower: 20, upper: 80}},      // Macaronesian
+    '100009': {evi: {lower: 0.15, upper: 0.5}, soc: {lower: 20, upper: 70}},     // Mediterranean
+    '100010': {evi: {lower: 0.05, upper: 0.4}, soc: {lower: 10, upper: 100}},    // Outside Europe
+    '100011': {evi: {lower: 0.1, upper: 0.4}, soc: {lower: 20, upper: 80}},      // Pannonian
+    '100012': {evi: {lower: 0.05, upper: 0.3}, soc: {lower: 15, upper: 50}}      // Steppic
+  });
+
+
+/////////////////////////////////
+// 3. UTILITY FUNCTIONS        //
+/////////////////////////////////
+// Clip image to region
+function clipToRegion(image, geometry) {
+  // Use the global regionGeom if no specific geometry is provided
+  var clipGeometry = (geometry !== undefined) ? geometry : regionGeom;
+  return image.clip(clipGeometry);
+}
+
+// Normalization functions (implement as before)
+function normalizeEVI(eviImage, compositeKey) { /* ... */ }
+function normalizeSOC(socImage, compositeKey) { /* ... */ }
+// ... [other normalization helpers as needed] ...
+
+// Export as tiles
+function exportAsTiles(image, namePrefix, tilesPerSide, bufferedGeom, exportScale) { /* ... */ }
+
+// NDVI normalization (example)
+function normalizeOneNDVIServerSide(ndviImage, worldCover, biogeoZonesRaster, regionGeom) { /* ... */ }
+
+/////////////////////////////////
+// 4. MAIN WORKFLOW CALLBACK   //
+/////////////////////////////////
+selectionModule.setOnSelectionCallback(function(selectedFeatureCollection) {
+  //////////////////////
+  //// REGION & SCALE //
+  //////////////////////
+  var region = selectionModule.getSelectedFeatureCollection();
+  var originalGeom = region.geometry();
+
+  // Buffer and simplify region
+  var simplifiedGeom = originalGeom.simplify(SIMPLIFY_TOLERANCE);
+  var bufferedGeom = simplifiedGeom.buffer(BUFFER_DISTANCE);
+  var computeGeom = bufferedGeom.simplify(MILD_SIMPLIFICATION);
+  var regionGeom = bufferedGeom;
+
+  // Vertex count logging
+  try {
+    if (originalGeom.type().equals('GeometryCollection')) {
+      var geometries = originalGeom.geometries();
+      var vertexCount = geometries.map(function(geom) {
+        return ee.Geometry(geom).coordinates().flatten().length().divide(2);
+      }).reduce(ee.Reducer.sum());
+    } else {
+      var vertexCount = originalGeom.coordinates().flatten().length().divide(2);
+    }
+  } catch (error) {
+    print('Could not calculate vertex count due to geometry size or type:', error);
+  }
+
+  // Add geometries to the map
+  Map.centerObject(regionGeom);
+  Map.addLayer(originalGeom, {color: 'red'}, 'Original Region');
+  Map.addLayer(regionGeom, {color: 'yellow', fillColor: '00000000'}, 'Simplified Geometry');
+
+  // Evaluate area size ONCE and use consistently throughout
+  var regionAreaKm2 = ee.Number(regionGeom.area()).divide(1000000);
+  
+  // Get the region area as a client-side value to avoid serialization issues
+  var regionAreaValue = regionAreaKm2.getInfo();
+
+  
+  if (regionAreaValue < SCALE_THRESHOLD) {
+    isLargeAreaValue = false;
+  } else {
+    isLargeAreaValue = true;
+  }
+
+  
+  // Adaptive sampling scale - between 100m and 1000m based on area size
+  var samplingScale = ee.Algorithms.If(
+    isLargeAreaValue===true,  
+    // For large areas: scale from 100m to 1000m based on how much larger than threshold
+    ee.Number(regionAreaKm2.subtract(SCALE_THRESHOLD))
+      .divide(400000-ANALYZE_SCALE)  // Scale factor to normalize the range
+      .multiply(900)   // Spread over 900m range (100 to 1000)
+      .add(ANALYZE_SCALE)  // Start at base scale (100m)
+      .max(ANALYZE_SCALE)  // Ensure minimum of 100m
+      .min(1000),     // Cap at 1000m maximum
+    // For small areas: just use the base analysis scale
+    ANALYZE_SCALE
+  );
+  
+  // Print area information once
+  print('Region area (km²):', regionAreaValue);
+  print('Is region larger than ' + SCALE_THRESHOLD + ' km²?', isLargeAreaValue);
+  print('Adaptive sampling scale (m):', samplingScale);
+
+
+  // Normalization functions - using biophysically-based thresholds with linear normalization
+  // ======= EVI NORMALIZATION FUNCTION =======
+  function normalizeEVI(eviImage, compositeKey) {
+    var key = ee.String(compositeKey);
+    // Anchors based on EVI characteristics
+    var anchors = ee.Dictionary(globalAnchors.get(key)).get('evi');
+
+    // Properly parse the string key to a number
+    var keyNum = ee.Number.parse(key);
+    var landcover = keyNum.divide(1000).floor();
+
+    var isWater = landcover.eq(80);
+
+    // Get threshold values - adjust for EVI which typically has lower values than NDVI
+    var lower = ee.Number(ee.Dictionary(anchors).get('lower'));
+    var upper = ee.Number(ee.Dictionary(anchors).get('upper'));
+
+    // Debugging: Print eviImage to ensure it is an ee.Image
+    print('eviImage:', eviImage);
+
+    // Apply linear normalization for land (standard approach - higher is better)
+    var normalLand = eviImage.subtract(lower)
+                            .divide(upper.subtract(lower));
+
+    // For water bodies, we invert the normalization (lower EVI = better water quality)
+    var normalWater = ee.Image(1).subtract(
+      eviImage.subtract(lower)
+               .divide(upper.subtract(lower))
+    );
+
+    return normalLand
+      .where(isWater, normalWater);
+  }
+
+  function normalizeSOC(socImage, compositeKey) {
+    var key = ee.String(compositeKey);
+    var anchors = ee.Dictionary(globalAnchors.get(key)).get('soc');
+
+    // Properly parse the string key to a number
+    var keyNum = ee.Number.parse(key);
+    var landcover = keyNum.divide(1000).floor();
+
+    var skipNormalization = landcover.eq(80).or(landcover.eq(90)).or(landcover.eq(50));
+
+    // Get threshold values
+    var lower = ee.Number(ee.Dictionary(anchors).get('lower'));
+    var upper = ee.Number(ee.Dictionary(anchors).get('upper'));
+
+    // Apply linear normalization
+    var normalized = socImage.subtract(lower)
+                            .divide(upper.subtract(lower));
+
+    return normalized
+      .where(skipNormalization, ee.Image.constant(0));
+  }
+
+  function getCompositeKey(landcover, bioregion) {
+    return ee.Number(landcover).multiply(1000).add(bioregion).format();
+  }
+
+  function parseCompositeKey(compositeKey) {
+    var keyNum = ee.Number.parse(compositeKey);
+    return {
+      landcover: keyNum.divide(1000).floor(),
+      bioregion: keyNum.mod(1000)
+    };
+  }
+
+  //////////////////////////////////////
+  // 1. Load and prepare base data
+  //////////////////////////////////////
+
+  // Load land cover and biogeographical zones first with simplified bounds
+  var worldCover = ee.Image("ESA/WorldCover/v100/2020")
+    .select('Map')
+    .clip(regionGeom);  // Use simplified geometry
+
+  // Use pre-filtered collection to reduce computation
+  var biogeoZones = ee.FeatureCollection('projects/ee-pkdroche/assets/BiogeoRegions2016')
+    .filterBounds(regionGeom);  // Use simplified geometry
+
+  var biogeoZonesRaster = biogeoZones.reduceToImage({
+    properties: ['PK_UID'],
+    reducer: ee.Reducer.first()
+  }).rename('PK_UID').clip(regionGeom);  // Use simplified geometry
+
+  //////////////////////////////////////
+  // 2. Create composite key approach - optimized
+  //////////////////////////////////////
+
+  // Create composite key image
+  var compositeKeyImage = worldCover.multiply(1000).add(biogeoZonesRaster);
+
+  // Optimize unique combinations processing - limit sample size for large areas
+  // For regions < 40,000 km² use ANALYZE_SCALE, scale gradually up to 1000m for regions > 400,000 km²
+
+  var uniqueKeysDict = compositeKeyImage.reduceRegion({
+    reducer: ee.Reducer.frequencyHistogram(),
+    geometry: regionGeom,  // Use simplified geometry
+    scale: samplingScale,  // Use adaptive sampling scale
+    maxPixels: 1e13,        // Reduced from 1e21 to prevent memory issues
+    bestEffort: true       // This will sample the region appropriately
+  });
+
+  // Create an Earth Engine Dictionary
+  var mapDict = ee.Dictionary(uniqueKeysDict.get('Map'));
+  var keyList = mapDict.keys();
+
+  // Optimized normalization functions
+  function normalizeOneEVIServerSide(eviImage, worldCover, biogeoZonesRaster, regionGeom) {
+    // SIMPLIFIED DIRECT APPROACH - USING CLIENT-SIDE LOOP LIKE SOC FUNCTION
+    // Create composite key image - combining land cover and bioregion
+    var compositeKeyImage = worldCover.multiply(1000).add(biogeoZonesRaster);
+    
+    // Start with a blank image
+    var result = ee.Image(0).float().clip(regionGeom);
+    
+    // Create urban mask for later use
+    var urbanMask = worldCover.eq(50);
+    
+    // Get all the anchor keys from our global dictionary (convert to client-side)
+    var allAnchorKeys = globalAnchors.keys().getInfo();
+    print('Using ' + allAnchorKeys.length + ' anchor keys for EVI normalization');
+    
+    // Loop through all available anchor keys - process directly on client side
+    // EXACTLY LIKE THE SOC FUNCTION THAT WORKS
+    for (var i = 0; i < allAnchorKeys.length; i++) {
+      var key = allAnchorKeys[i];
+      var keyNum = parseInt(key);
+      
+      // Create a mask where this key exists
+      var keyMask = compositeKeyImage.eq(keyNum);
+      
+      // Get the normalization anchor values
+      var anchors = ee.Dictionary(globalAnchors.get(key));
+      var eviAnchors = ee.Dictionary(anchors.get('evi'));
+      var eviLower = ee.Number(eviAnchors.get('lower'));
+      var eviUpper = ee.Number(eviAnchors.get('upper'));
+      
+      // Properly parse land cover from key number
+      var landcover = Math.floor(keyNum / 1000);
+      var isWater = (landcover === 80);
+      
+      // Normalize EVI values based on anchors, for this specific land cover/bioregion combo
+      var normalizedValue = eviImage.subtract(eviLower)
+                               .divide(eviUpper.subtract(eviLower))
+                               .clamp(0, 1);
+      
+      // For water bodies, invert the normalization (lower EVI = better water quality)
+      if (isWater) {
+        normalizedValue = ee.Image(1).subtract(normalizedValue);
+      }
+      
+      // Add this normalized segment to the result
+      result = result.where(keyMask, normalizedValue);
+    }
+    
+    // Ensure urban areas are set to 0
+    result = result.where(urbanMask, 0);
+    
+    return result.clip(regionGeom);
+  }
+
+  function normalizeOneSOC(socImage, worldCover, bioregions, regionGeom) {
+    // Extract LC codes
+    var lc = worldCover;
+    
+    // Extract bioregion codes
+    var biocode = bioregions.select('PK_UID');
+    
+    // Create a composite key by concatenating LC and bioregion
+    var compositeKeyImage = lc.multiply(1000).add(biocode);
+    
+    // Get unique combinations using a coarser scale for efficiency
+    var uniqueCombs = compositeKeyImage.reduceRegion({
+      reducer: ee.Reducer.frequencyHistogram(),
+      geometry: regionGeom,
+      scale: 1000,  // Use coarse scale for efficiency
+      maxPixels: 1e13,
+      bestEffort: true
+    });
+    
+    // Start with a blank image
+    var result = ee.Image(0).float().clip(regionGeom);
+    
+    // Create urban mask first (for efficiency)
+    var urbanMask = worldCover.eq(50);
+    
+    // Get all the anchor keys from our global dictionary (convert to client-side)
+    var allAnchorKeys = globalAnchors.keys().getInfo();
+    
+    // Loop through all available anchor keys - process directly on client side
+    for (var i = 0; i < allAnchorKeys.length; i++) {
+      var key = allAnchorKeys[i];
+      var keyNum = parseInt(key);
+      
+      // Create a mask where this key exists
+      var keyMask = compositeKeyImage.eq(keyNum);
+      
+      // Get the normalization anchor values
+      var anchors = ee.Dictionary(globalAnchors.get(key));
+      var socAnchors = ee.Dictionary(anchors.get('soc'));
+      var socLower = ee.Number(socAnchors.get('lower'));
+      var socUpper = ee.Number(socAnchors.get('upper'));
+      
+      // Properly parse land cover from key number
+      var landcover = Math.floor(keyNum / 1000);
+      
+      // Normalize SOC values based on anchors, for this specific land cover/bioregion combo
+      var normalizedValue = socImage.subtract(socLower)
+                                .divide(socUpper.subtract(socLower))
+                                .clamp(0, 1);
+      
+      // Update the result only where the mask applies
+      result = result.where(keyMask, normalizedValue);
+    }
+    
+    // Ensure urban areas are set to 0
+    result = result.where(urbanMask, 0);
+    
+    return result.clip(regionGeom);
+  }
+
+  //////////////////////////////////////
+  // EVI Processing ///////////////////
+  //////////////////////////////////////
+
+  // ======= EVI CALCULATION FUNCTION =======
+  // This function calculates EVI from Landsat imagery
+  function addEVI(image) {
+    // Scale the surface reflectance bands (they come as 0-10000)
+    var scaled = image.select(['SR_B2', 'SR_B4', 'SR_B5'])
+                 .multiply(0.0000275).add(-0.2);  // Apply scale and offset
+    
+    // EVI = 2.5 * ((NIR - RED) / (NIR + 6 * RED - 7.5 * BLUE + 1))
+    var evi = scaled.expression(
+      '2.5 * ((NIR - RED) / (NIR + 6 * RED - 7.5 * BLUE + 1))', {
+        'NIR': scaled.select('SR_B5'),
+        'RED': scaled.select('SR_B4'),
+        'BLUE': scaled.select('SR_B2')
+      }).float().rename('EVI').clip(regionGeom);
+    
+    return image.addBands(evi);
+  }
+
+  // EVI calculation for MODIS data
+  function calculateMODISEVI(modisImage) {
+    // MODIS already provides EVI product, but we need to rescale it from int to float
+    return modisImage.select('EVI').multiply(0.0001).float().clip(regionGeom);
+  }
+
+  // ======= EVI NORMALIZATION FUNCTION =======
+  function normalizeEVI(eviImage, compositeKey) {
+    var key = ee.String(compositeKey);
+    // We'll use the same anchors as NDVI initially, but they should be adjusted based on EVI characteristics
+    var anchors = ee.Dictionary(globalAnchors.get(key)).get('evi');
+  
+    // Properly parse the string key to a number
+    var keyNum = ee.Number.parse(key);
+    var landcover = keyNum.divide(1000).floor();
+
+    var isWater = landcover.eq(80);
+  
+    // Get threshold values - adjust for EVI which typically has lower values than NDVI
+    var lower = ee.Number(ee.Dictionary(anchors).get('lower')); 
+    var upper = ee.Number(ee.Dictionary(anchors).get('upper'));
+  
+    // Apply linear normalization for land (standard approach - higher is better)
+    var normalLand = eviImage.subtract(lower)
+                          .divide(upper.subtract(lower))
+                          .clamp(0, 1);
+  
+    // For water bodies, we invert the normalization (lower EVI = better water quality)
+    var normalWater = ee.Image(1).subtract(
+      eviImage.subtract(lower)
+               .divide(upper.subtract(lower))
+               .clamp(0, 1)
+    );
+
+    return normalLand
+      .where(isWater, normalWater);
+  }
+
+  // Set up date parameters
+  var startDate = ee.Date('2019-01-01');
+  var endDate = ee.Date('2020-12-31');  
+
+  // Load and process EVI data based on area size
+  var eviMax;
+
+
+  if (isLargeAreaValue === true) {
+    // Large areas
+    print("Using MODIS EVI for large area (>60000 km²)");
+
+    // Process quarterly composites for MODIS (same approach as Landsat)
+    var quarterlyComposites = ee.List.sequence(0, 9, 3)
+      .map(function(monthOffset) {
+        var startMonth = ee.Date(startDate).advance(monthOffset, 'month');
+        var endMonth = startMonth.advance(3, 'month');
+        return ee.ImageCollection("MODIS/061/MOD13Q1")
+          .select('EVI')
+          .filterDate(startMonth, endMonth)
+          .filterBounds(regionGeom)
+          .map(function(img) {
+            return clipToRegion(img, regionGeom);
+          })
+          .reduce(ee.Reducer.percentile([95]))
+          .multiply(0.0001)  // Convert from scaled int to float
+          .float()
+          .clip(regionGeom);
+      });
+
+    eviMax = ee.ImageCollection(quarterlyComposites)
+      .max()
+      .clip(regionGeom);
+  } else {
+    // Small areas
+    print("Using Landsat EVI for smaller area (<=60000 km²)");
+
+    var dataset = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2")
+      .filterBounds(regionGeom)
+      .filterDate(startDate, endDate)
+      .map(function(img) {
+        return clipToRegion(img, regionGeom);
+      });
+
+    // Process quarterly composites for smaller areas
+    var quarterlyComposites = ee.List.sequence(0, 9, 3)
+      .map(function(monthOffset) {
+        var startMonth = ee.Date(startDate).advance(monthOffset, 'month');
+        var endMonth = startMonth.advance(3, 'month');
+        return dataset
+          .filterDate(startMonth, endMonth)
+          .map(addEVI)
+          .select('EVI')
+          .max()
+          .clip(regionGeom);
+      });
+
+    eviMax = ee.ImageCollection(quarterlyComposites)
+      .max()
+      .clip(regionGeom);
+  }
+
+  // Ensure eviMax is an ee.Image
+  eviMax = ee.Image(eviMax);
+
+  // Call normalizeOneEVIServerSide with eviMax
+  var normalizedEVI = normalizeOneEVIServerSide(eviMax, worldCover, biogeoZonesRaster, regionGeom);
+
+  //////////////////////////////////////
+  // Load Other Datasets //////////////
+  //////////////////////////////////////
+
+  //////////////////////////////////////
+  // Soil carbon //////////////////////
+  /////////////////////////////////////
+
+  // Load soil carbon data at appropriate scale
+  var isric_ocs = ee.Image("projects/soilgrids-isric/ocs_mean")
+    .reproject({
+      crs: 'EPSG:4326',
+      scale: Math.min(1000, ANALYZE_SCALE * 2)  // Use coarser resolution for large areas
+    })
+    .clip(regionGeom);  // CRITICAL: Clip to region
+
+  //////////////////////////////////////
+  // Biodiversity Intactness Index /////
+  //////////////////////////////////////
+
+  var bdi_ic = ee.ImageCollection("projects/ebx-data/assets/earthblox/IO/BIOINTACT");
+  var bdi_2020_comp = bdi_ic.filterDate('2020-01-01', '2020-12-31')
+    .median()
+    .reproject({
+      crs: 'EPSG:4326',
+      scale: ANALYZE_SCALE
+    })
+    .clip(regionGeom);
+
+  //////////////////////////////////////
+  // Habitat heterogeneity /////////////
+  //////////////////////////////////////
+
+  // Load and resample in one step to reduce memory usage
+  var contrast = ee.Image("projects/sat-io/open-datasets/global_habitat_heterogeneity/contrast_1km")
+    .reproject({
+      crs: worldCover.projection(),
+      scale: Math.max(ANALYZE_SCALE, 1000)  // Use original or higher resolution
+    })
+    .divide(1600000)
+    .clip(regionGeom);
+
+  var shannon = ee.Image("projects/sat-io/open-datasets/global_habitat_heterogeneity/shannon_1km")
+    .reproject({
+      crs: worldCover.projection(),
+      scale: Math.max(ANALYZE_SCALE, 1000)  // Use original or higher resolution
+    })
+    .divide(30000)
+    .clip(regionGeom);
+
+  //////////////////////////////////////
+  // Air Quality //////////////////////
+  //////////////////////////////////////
+
+  // Load and process air quality data with optimized approach for speed
+  // Note: S5P NO2 data has native resolution of ~7km, much coarser than other layers
+
+  // Use quarterly composites to reduce computation time while maintaining seasonal patterns
+  var airQualityQuarters = [
+    {start: '2020-01-01', end: '2020-03-31'},
+    {start: '2020-04-01', end: '2020-06-30'},
+    {start: '2020-07-01', end: '2020-09-30'},
+    {start: '2020-10-01', end: '2020-12-31'}
+  ];
+
+  // Process each quarter separately and then combine
+  var quarterlyAirQuality = ee.ImageCollection.fromImages(
+    airQualityQuarters.map(function(quarter) {
+      return ee.ImageCollection('COPERNICUS/S5P/NRTI/L3_NO2')
+        .select('tropospheric_NO2_column_number_density')
+        .filterDate(quarter.start, quarter.end)
+        .filterBounds(regionGeom)
+        .mean()  // Mean for each quarter
+        .clip(regionGeom);
+    })
+  );
+
+  // Take median of quarterly composites (much faster than median of all daily images)
+  var airQuality = quarterlyAirQuality.median();
+
+  // Fixed normalization values for tropospheric NO2
+  var NO2_MIN = 0.000008; // mol/m²
+  var NO2_MAX = 0.0002;  // mol/m²
+
+  // Normalize air quality with inverted scale (lower NO2 = better air quality)
+  var airQuality_normalized = ee.Image(1).subtract(
+    airQuality
+      .subtract(NO2_MIN)
+      .divide(NO2_MAX - NO2_MIN)
+  );
+
+  // Explicitly set the scale of the air quality layer to match its native resolution
+  // This prevents unnecessary resampling during visualization and processing
+  airQuality_normalized = airQuality_normalized
+    .reproject({crs: 'EPSG:4326', scale: 7000})
+    .clip(regionGeom);
+
+  print('Air Quality: Processed at native ~7km resolution');
+
+  //////////////////////////////////////
+  // Natural Land Cover Percentage ////
+  //////////////////////////////////////
+
+  var classValues = [10, 20, 30, 60, 70, 80, 90, 95, 100];
+  var combinedMask = worldCover.remap(classValues, ee.List.repeat(1, classValues.length), 0);
+
+  // Calculate percentage with adjustable radius for large areas
+  var radius = ee.Number(regionGeom.area()).sqrt().lt(100000000) ? 500 : 1000;
+  var kernel = ee.Kernel.circle({radius: radius, units: 'meters', normalize: true});
+  var percentageCover = combinedMask.reduceNeighborhood({
+    reducer: ee.Reducer.mean(),
+    kernel: kernel
+  });
+
+  /// Normalization NDVI/SOC - consistent approach for all regions ////
+  var normalizedEVI, normalizedSOC;
+
+  // Use appropriate geometry for normalization
+  var normGeom = regionGeom;
+
+  // For regions above a certain size optimize processing
+  if (isLargeAreaValue === true) {
+    print("Large area detected - using optimized normalization with full regional specificity");
+
+    // Optimize by using coarser scale for the normalization
+    var optimizedScale = Math.max(ANALYZE_SCALE * 3, 1000);
+    print("Using optimized scale for large area processing:", optimizedScale);
+
+    // Simplify the geometry slightly for computation efficiency
+    normGeom = computeGeom;
+  } else {
+    print("Small area detected - using standard normalization");
+  }
+
+  // Use the detailed normalization for all areas
+  normalizedEVI = normalizeOneEVIServerSide(eviMax, worldCover, biogeoZonesRaster, regionGeom);
+  normalizedSOC = normalizeOneSOC(isric_ocs, worldCover, biogeoZonesRaster, regionGeom);
+
+  // Print min/max values for NDVI and SOC layers
+  var statsGeom = regionGeom;
+
+  //////////////////////////////////////
+  // Water Quality Normalization //////
+  //////////////////////////////////////
+
+  // Water quality normalization function based on Sentinel-2 Water Quality (Se2WaQ)
+  // https://custom-scripts.sentinel-hub.com/custom-scripts/sentinel-2/se2waq/
+
+  function normalizeWaterQuality(image, regionGeom) {
+    // Get Sentinel-2 bands
+    var s2 = ee.ImageCollection('COPERNICUS/S2_SR')
+      .filterBounds(regionGeom)
+      .filterDate(startDate, endDate) // Use existing date variables
+      .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 20))
+      .median()
+      .clip(regionGeom);
+
+    // Extract bands needed for water quality assessment
+    var B01 = s2.select('B1'); // 443nm
+    var B02 = s2.select('B2'); // 490nm
+    var B03 = s2.select('B3'); // 560nm
+    var B04 = s2.select('B4'); // 665nm
+    var B08 = s2.select('B8'); // 842nm
+
+    // Create a buffered water mask to avoid gaps
+    // Use worldCover to identify water bodies (code 80)
+    var waterMask = worldCover.eq(80);
+
+    // Calculate water quality parameters
+    // Chlorophyll-a (Chl_a)
+    var Chl_a = B03.divide(B01).pow(3.94).multiply(4.26);
+
+    // Cyanobacteria (Cya)
+    var Cya = B03.multiply(B04).divide(B02).pow(2.38).multiply(115530.31);
+
+    // Turbidity (Turb)
+    var Turb = B03.divide(B01).multiply(8.93).subtract(6.39);
+
+    // Colored Dissolved Organic Matter (CDOM)
+    var CDOM = ee.Image(537).multiply(B03.divide(B04).multiply(-2.93).exp());
+
+    // Dissolved Organic Carbon (DOC)
+    var DOC = ee.Image(432).multiply(B03.divide(B04).multiply(-2.24).exp());
+
+    // Water Color (Color)
+    var Color = ee.Image(25366).multiply(B03.divide(B04).multiply(-4.53).exp());
+
+    // Normalize each parameter using sigmoid function
+    // Define reference values for each parameter
+    var Chl_a_min = 0;
+    var Chl_a_max = 50;
+    var Chl_a_mid = (Chl_a_min + Chl_a_max) / 2;
+    var Chl_a_scale = 4 / (Chl_a_max - Chl_a_min);
+
+    var Turb_min = 0;
+    var Turb_max = 20;
+    var Turb_mid = (Turb_min + Turb_max) / 2;
+    var Turb_scale = 4 / (Turb_max - Turb_min);
+
+    var Color_min = 0;
+    var Color_max = 50;
+    var Color_mid = (Color_min + Color_max) / 2;
+    var Color_scale = 4 / (Color_max - Color_min);
+
+    // Normalize each parameter (higher values indicate worse water quality, so invert)
+    var normChl_a = ee.Image(1).subtract(
+      ee.Image(1).divide(ee.Image(1).add(ee.Image(Chl_a.subtract(Chl_a_mid).multiply(Chl_a_scale).multiply(-1)).exp()))
+    );
+
+    var normTurb = ee.Image(1).subtract(
+      ee.Image(1).divide(ee.Image(1).add(ee.Image(Turb.subtract(Turb_mid).multiply(Turb_scale).multiply(-1)).exp()))
+    );
+
+    var normColor = ee.Image(1).subtract(
+      ee.Image(1).divide(ee.Image(1).add(ee.Image(Color.subtract(Color_mid).multiply(Color_scale).multiply(-1)).exp()))
+    );
+
+    // Combine the parameters (equal weights)
+    var waterQualityIndex = normChl_a.add(normTurb).add(normColor).divide(3);
+
+    // Apply buffered water mask
+    return waterQualityIndex.updateMask(waterMask);
+  }
+
+  var waterQuality = normalizeWaterQuality(eviMax, regionGeom);
+
+  //////////////////////////////////////
+  // Calculate Ecosystem Condition ////
+  //////////////////////////////////////
+
+  // Create weighted ecosystem condition index using optimized expression
+  var weights = [0.20, 0.25, 0.20, 0.25, 0.10];  // [SOC, BDI, NDVI, Cover, AirQuality]
+
+  // Standard ecosystem condition index for natural areas
+  var ECImage = ee.Image().expression(
+    '(w1 * EVI + w2 * SOC + w3 * BDI + w4 * Cover + w5 * AirQuality) / (w1 + w2 + w3 + w4 + w5)', {
+      'EVI': normalizedEVI.float(),
+      'SOC': normalizedSOC.float(),
+      'BDI': bdi_2020_comp.float(),
+      'Cover': percentageCover.float(),
+      'AirQuality': airQuality_normalized.float(),
+      'w1': weights[0],
+      'w2': weights[1],
+      'w3': weights[2],
+      'w4': weights[3],
+      'w5': weights[4]
+    }).rename('ECI');
+
+  // Water bodies ecosystem condition index
+  var weightsWater = [0.6, 0.30, 0.10];  // [WaterQuality, Cover, AirQuality]
+  var ECImageWater = ee.Image().expression(
+    '(WQ * w0) + (Cover * w1) + (AirQuality * w2)', {
+      'WQ': waterQuality.float(),  // Base water quality
+      'Cover': percentageCover.float(),
+      'AirQuality': airQuality_normalized.float(),
+      'w0': weightsWater[0],
+      'w1': weightsWater[1],
+      'w2': weightsWater[2]
+    }).rename('ECI');
+
+  // Urban areas calculation with reallocated weights
+    var ECImageNC = ee.Image().expression(
+      '(w1 * EVI + w2 * SOC + w3 * BDI + w4 * Cover + w5 * AirQuality) / (w1 + w2 + w3 + w4 + w5)', {
+        'EVI': normalizedEVI.float(),
+        'SOC': normalizedSOC.float(),
+        'BDI': bdi_2020_comp.float(),
+        'Cover': percentageCover.float(),
+        'AirQuality': airQuality_normalized.float(),
+        'w1': weights[0],
+        'w2': weights[1],
+        'w3': weights[2],
+        'w4': weights[3],
+        'w5': weights[4]
+      }).rename('ECI');
+
+  // Create masks for different land cover types
+  var waterMask = worldCover.eq(80);
+  var urbanMask = worldCover.eq(50);
+
+
+  // Create region mask
+  var regionMask = ee.Image(1).clip(bufferedGeom);
+
+  // Combine images with appropriate masks
+  // 1. Start with the standard ecosystem condition index
+  // 2. Apply water quality for water bodies
+  // 3. Apply urban index for urban areas
+  // 4. Apply wetland-specific processing if needed
+  // 5. Fill any remaining gaps with a mid-range value
+  var FinalECImage = ECImage
+    .blend(ECImageWater.updateMask(waterMask))              // Water bodies use water quality
+    .blend(ECImageNC.updateMask(urbanMask))                // Urban areas use urban-specific index
+    .unmask(0.5)                                           // Fill any remaining gaps with a mid-range value
+    .updateMask(regionMask)                                // Apply region mask
+    .clip(bufferedGeom);                                   // Clip to buffered region boundary
+
+  //////////////////////////////////////
+  // Create UI Panel for Progress /////
+  //////////////////////////////////////
+  
+  // Setup UI panel for status updates
+  var panel = ui.Panel({
+    style: {
+      position: 'bottom-left',
+      padding: '8px 15px',
+      width: '300px'
+    }
+  });
+  
+  var title = ui.Label({
+    value: 'Ecosystem Condition Index v12',
+    style: {fontWeight: 'bold', fontSize: '18px', margin: '0 0 4px 0'}
+  });
+  
+  var subtitle = ui.Label({
+    value: 'Processing Status',
+    style: {fontSize: '14px', margin: '0 0 10px 0'}
+  });
+  
+  var progressLabel = ui.Label('Progress:');
+  var statusLabel = ui.Label({
+    value: 'Starting...',
+    style: {color: 'orange'}
+  });
+  
+  // Add region size information
+  var regionSizeLabel = ui.Label('Region size:');
+  var regionStatusLabel = ui.Label({
+    value: isLargeAreaValue ? 'Large region detected - optimized processing' : 'Standard processing',
+    style: {color: isLargeAreaValue ? 'orange' : 'green'}
+  });
+  
+  panel.add(title);
+  panel.add(subtitle);
+  panel.add(progressLabel);
+  panel.add(statusLabel);
+  panel.add(regionSizeLabel);
+  panel.add(regionStatusLabel);
+  
+  // Add the panel to the map
+  Map.add(panel);
+  
+  //////////////////////////////////////
+  // Visualization ///////////////////
+  //////////////////////////////////////
+
+  // Create minimal property version of the layers to reduce description length
+  var bioregSimple = biogeoZonesRaster.select('PK_UID');
+
+  // Simplified visualization parameters
+  var visParams = {
+    bioregions: {
+      min: 1,
+      max: 12,
+      palette: ['red', 'green', 'blue', 'yellow', 'purple', 'cyan',
+                'brown', 'orange', 'pink', 'gray', 'white', 'black']
+    },
+    condition: {
+      min: 0,
+      max: 1,
+      palette: ['red', 'yellow', 'green']
+    }
+  };
+
+  // Function to update progress and add a layer
+  function addLayerWithProgress(layer, visParams, name, progress) {
+    statusLabel.setValue('Processing: ' + name + ' (' + progress + '%)');
+    Map.addLayer(layer, visParams, name);
+  }
+  
+  // Add layers progressively with status updates
+  addLayerWithProgress(bioregSimple, visParams.bioregions, 'Bioregions', 10);
+  addLayerWithProgress(worldCover.randomVisualizer(), {}, 'Land Cover', 20);
+  
+  // Add raw EVI max layer for debugging
+  addLayerWithProgress(eviMax, {
+    min: -0.2,
+    max: 0.8,
+    palette: ['blue', 'white', 'green']
+  }, 'Raw EVI Max (before normalization)', 30);
+  
+  addLayerWithProgress(normalizedEVI, visParams.condition, 'EVI', 40);
+  addLayerWithProgress(normalizedSOC, visParams.condition, 'Soil Carbon', 50);
+  addLayerWithProgress(bdi_2020_comp, visParams.condition, 'BDI', 60);
+  addLayerWithProgress(percentageCover, visParams.condition, 'Natural Cover', 70);
+  addLayerWithProgress(airQuality_normalized, visParams.condition, 'Air Quality', 80);
+  addLayerWithProgress(waterQuality, visParams.condition, 'Water Quality', 90);
+  addLayerWithProgress(FinalECImage, visParams.condition, 'Ecosystem Condition', 100);
+  
+  // Update final status
+  statusLabel.setValue('All layers processed (100%)');
+  statusLabel.style().set('color', 'green');
+
+  //////////////////////////////////////
+  // Exports ///////////////////////////
+  //////////////////////////////////////
+
+  // Modified export functions based on region size - using consistent isLargeArea check
+  var exportScale = isLargeAreaValue ?
+    Math.max(ANALYZE_SCALE * 2, 500) :  // Larger scale (coarser resolution) for large areas
+    ANALYZE_SCALE;                      // Original scale for smaller areas
+
+  // Set a fixed, high maxPixels value to avoid export size errors
+  var maxAllowedPixels = 1e13;  // Use Earth Engine's maximum limit
+
+  print("Export scale:", exportScale);
+  print("Max allowed pixels:", maxAllowedPixels);
+
+  // Calculate estimated pixels for the export
+  var estimatedPixels = ee.Number(bufferedGeom.area()).divide(exportScale * exportScale);
+  print("Estimated pixels:", estimatedPixels);
+
+  // Check if region is too large for direct export
+  var isTooLarge = estimatedPixels.gt(maxAllowedPixels);
+
+  // Function to handle exports based on region size
+  function handleExport(image, description, folder, scale, region, maxPixels, fileFormat, formatOptions) {
+    // Get client-side boolean for region size check
+    var needsTiling = isTooLarge.getInfo();
+
+    if (needsTiling) {
+      print("Region too large for direct export. Using tiled export for: " + description);
+      // Calculate optimal number of tiles based on region size
+      var tilesPerSide = Math.ceil(Math.sqrt(estimatedPixels.divide(maxAllowedPixels * 0.8).getInfo()));
+      tilesPerSide = Math.max(2, Math.min(5, tilesPerSide)); // Keep between 2 and 5 tiles per side
+
+      exportAsTiles(image, description, tilesPerSide);
+    } else {
+      // Standard export for smaller regions
+      Export.image.toDrive({
+        image: image,
+        description: description,
+        folder: folder,
+        scale: scale,
+        region: region, // Fix: Removed .bounds().toGeoJSONString()
+        maxPixels: maxPixels,
+        fileFormat: fileFormat,
+        formatOptions: formatOptions
+      });
+    }
+  }
+
+  // Export normalized layers with optimized parameters using the new handler
+  handleExport(
+    normalizedEVI.rename('evi_norm'),
+    'Normalized_EVI_v12',
+    'Ecosystem_Condition_EU',
+    exportScale,
+    bufferedGeom,
+    maxAllowedPixels,
+    'GeoTIFF',
+    { cloudOptimized: true }
+  );
+
+  handleExport(
+    bdi_2020_comp.rename('bdi_norm'),
+    'Normalized_BDI_v12',
+    'Ecosystem_Condition_EU',
+    exportScale,
+    bufferedGeom,
+    maxAllowedPixels,
+    'GeoTIFF',
+    { cloudOptimized: true }
+  );
+
+  handleExport(
+    normalizedSOC.rename('soc_norm'),
+    'Normalized_SOC_v12',
+    'Ecosystem_Condition_EU',
+    exportScale,
+    bufferedGeom,
+    maxAllowedPixels,
+    'GeoTIFF',
+    { cloudOptimized: true }
+  );
+
+  handleExport(
+    percentageCover.rename('nature_pct'),
+    'Percent_Natural_Area_v12',
+    'Ecosystem_Condition_EU',
+    exportScale,
+    bufferedGeom,
+    maxAllowedPixels,
+    'GeoTIFF',
+    { cloudOptimized: true }
+  );
+
+  handleExport(
+    airQuality_normalized.rename('air_quality'),
+    'Normalized_AirQuality_v12',
+    'Ecosystem_Condition_EU',
+    exportScale,
+    bufferedGeom,
+    maxAllowedPixels,
+    'GeoTIFF',
+    { cloudOptimized: true }
+  );
+
+  handleExport(
+    FinalECImage.rename('eco_index'),
+    'Ecosystem_Condition_State_v12',
+    'Ecosystem_Condition_EU',
+    exportScale,
+    bufferedGeom,
+    maxAllowedPixels,
+    'GeoTIFF',
+    { cloudOptimized: true }
+  );
+
+  handleExport(
+    waterQuality.rename('water_quality'),
+    'Normalized_WaterQuality_v12',
+    'Ecosystem_Condition_EU',
+    exportScale,
+    bufferedGeom,
+    maxAllowedPixels,
+    'GeoTIFF',
+    { cloudOptimized: true }
+  );
+
+  // Export statistics with limited entries for large areas - using consistent isLargeArea check
+  var maxKeyListLength = isLargeAreaValue ? 100 : 1000;
+
+  Export.table.toDrive(
+    ee.FeatureCollection(
+      ee.List.sequence(0, keyList.length().subtract(1).min(maxKeyListLength-1)).map(function(i) {
+        var key = ee.String(keyList.get(i));
+        var anchors = ee.Dictionary(globalAnchors.get(key));
+
+        return ee.Feature(null, {
+          'key': key,
+          'evi_lower': ee.Dictionary(anchors.get('evi')).get('lower'),
+          'evi_upper': ee.Dictionary(anchors.get('evi')).get('upper'),
+          'soc_lower': ee.Dictionary(anchors.get('soc')).get('lower'),
+          'soc_upper': ee.Dictionary(anchors.get('soc')).get('upper')
+        });
+      })
+    ),
+    {
+      description: 'Norm_Params_v12',
+      folder: 'Ecosystem_Condition_EU',
+      fileFormat: 'CSV'
+    }
+  );
+
+  // Export to CSV complete - no need for additional UI elements here
+  // The UI panel is already created in the earlier part of the code
+
+  // Only show manual tiling button if not already using tiled export
+  if (!isTooLarge.getInfo()) {
+    var tiledExportButton = ui.Button({
+      label: 'Force Tiled Export',
+      onClick: function() {
+        statusLabel.setValue('Starting manual tiled export...');
+        statusLabel.style().set('color', 'orange');
+        exportAsTiles(FinalECImage.rename('eco_index'), 'Ecosystem_Condition_Tiled', 4); // Split into 4 tiles (2x2 grid)
+      }
+    });
+
+    panel.add(ui.Label('Manual tiling:', {fontWeight: 'bold', margin: '10px 0 4px 0'}));
+    panel.add(tiledExportButton);
+  }
+
+
+  // Final processing status update
+  statusLabel.setValue('Processing complete!');
+});
+
+// Function to export a large region as tiles
+function exportAsTiles(image, namePrefix, tilesPerSide) {
+  // Always use the buffered geometry for tiling
+  var exportGeom = bufferedGeom;
+
+  // Get the region bounds
+  var bounds = exportGeom.bounds();
+  var coords = ee.List(bounds.coordinates().get(0));
+
+  // Get the corner points
+  var minPoint = ee.List(coords.get(0));
+  var maxPoint = ee.List(coords.get(2));
+
+  // Calculate x and y ranges
+  var minX = ee.Number(minPoint.get(0));
+  var minY = ee.Number(minPoint.get(1));
+  var maxX = ee.Number(maxPoint.get(0));
+  var maxY = ee.Number(maxPoint.get(1));
+
+  var xRange = maxX.subtract(minX);
+  var yRange = maxY.subtract(minY);
+
+  // For very complex geometries like Norway, use more tiles
+  var isComplexGeometry = false;
+
+  // Calculate tile size with 10% overlap
+  var tileXSize = xRange.divide(tilesPerSide).multiply(1.1);
+  var tileYSize = yRange.divide(tilesPerSide).multiply(1.1);
+
+  // Create and export tiles
+  for (var i = 0; i < tilesPerSide; i++) {
+    for (var j = 0; j < tilesPerSide; j++) {
+      // Calculate tile bounds
+      var tileMinX = minX.add(xRange.multiply(i).divide(tilesPerSide));
+      var tileMaxX = minX.add(xRange.multiply(i + 1).divide(tilesPerSide));
+      var tileMinY = minY.add(yRange.multiply(j).divide(tilesPerSide));
+      var tileMaxY = minY.add(yRange.multiply(j + 1).divide(tilesPerSide));
+
+      // Create tile geometry with overlap
+      var tileGeom = ee.Geometry.Rectangle([
+        tileMinX.subtract(tileXSize.multiply(0.05)),
+        tileMinY.subtract(tileYSize.multiply(0.05)),
+        tileMaxX.add(tileXSize.multiply(0.05)),
+        tileMaxY.add(tileYSize.multiply(0.05))
+      ]);
+
+      // Clip the tile to the actual region to avoid processing unnecessary areas
+      tileGeom = tileGeom.intersection(exportGeom);
+
+      // Skip empty tiles
+      var tileArea = tileGeom.area();
+      if (tileArea.gt(0).getInfo()) {
+        // Export this tile
+        Export.image.toDrive({
+          image: image.clip(tileGeom),
+          description: namePrefix + '_tile_' + i + '_' + j,
+          folder: 'Ecosystem_Condition_EU',
+          scale: exportScale,
+          region: tileGeom,
+          maxPixels: 1e13,
+          fileFormat: 'GeoTIFF',
+          formatOptions: {
+            cloudOptimized: true
+          }
+        });
+      }
+    }
+  }
+
+  print('Tiled export started: ' + (tilesPerSide * tilesPerSide) + ' tiles');
+}
+
+function normalizeOneNDVIServerSide(ndviImage, landcovers, bioregions , regionGeom) {
+  // Create composite key image
+  var compositeKeyImage = landcovers.multiply(1000).add(bioregions);
+
+  // Get unique combinations
+  var uniqueCombs = compositeKeyImage.reduceRegion({
+    reducer: ee.Reducer.frequencyHistogram(),
+    geometry: regionGeom,
+    scale: 1000,  // Use coarse scale for efficiency
+    maxPixels: 1e9,
+    bestEffort: true
+  });
+
+  // Extract keys
+  var keys = ee.Dictionary(uniqueCombs.get('Map')).keys();
+
+  // Create a base mask image
+  var baseMask = ee.Image(0).clip(regionGeom);
+
+  // Create a base normalized image
+  var baseNormalized = ee.Image(0).clip(regionGeom);
+
+  // Process each unique combination
+  var finalNormalized = ee.Image(keys.iterate(function(key, result) {
+    // Create mask for this combination
+    var mask = compositeKeyImage.eq(ee.Number.parse(key));
+
+    // Get land cover and bioregion from key
+    var keyObj = parseCompositeKey(key);
+    var landcover = keyObj.landcover;
+    var bioregion = keyObj.bioregion;
+
+    // Skip if not a valid combination
+    var validKey = ee.Algorithms.If(
+      globalAnchors.contains(key),
+      true,
+      false
+    );
+
+    return ee.Algorithms.If(
+      validKey,
+      // If valid key, normalize this segment
+      ee.Image(result).where(mask, normalizeNDVI(ndviImage, key)),
+      // Otherwise, use default normalization
+      result
+    );
+  }, baseNormalized));
+
+  return finalNormalized.clip(regionGeom);
+}
