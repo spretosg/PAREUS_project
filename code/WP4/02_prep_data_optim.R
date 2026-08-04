@@ -6,35 +6,48 @@ library(sf)
 library(terra)
 library(dplyr)
 library(ggplot2)
-source("WP4/1_code/wp4_functions_utils.R")
-main_dir<-"P:/312204_pareus/"
-siteID<-"FRL04"
+source("code/WP4/wp4_functions_utils.R")
+target_site<-"SK021"
 
 
 ####---- Input and processing ----####
 ## read PU from 01_pa_status.R
-grid<-st_read(paste0("WP4/2_output/01_PA_analysis/",siteID,"_input_grid.json"))
+grid<-st_read(paste0("outputs/WP4/01_PA_analysis/",target_site,"_input_grid.json"))
 
 ### Features
 ## Mean ecosystem service (cookbook nr.2)
-grand_mean_es<-terra::rast(paste0(main_dir,"WP2/T2.2/PGIS_ES_mapping/",siteID,"/es_weight_mean.tif"))
+grand_mean_es<-terra::rast(paste0("data/WP4/mean_es_",target_site,".tif"))
 # ES groups
-es_raster <- terra::rast(list.files(paste0(main_dir,"WP2/T2.2/PGIS_ES_mapping/",siteID,"/raw_data_backup/4_mean_R1"),pattern = "\\.tif$", full.names = TRUE))
+es_raster <- rast(paste0("data/WP4/es_individual_",target_site,".tif"))
+
+es_groups <- list(
+  provisioning = c("wild_plant", "wild_hunt", "farm", "mat"),
+  regulating   = c("erosion", "flood", "habitat"),
+  cultural     = c("aest", "recr","sense")
+)
+
 #prov es mean
-mean_prov <- mean(es_raster[[c(3, 6, 10, 11)]])
-#cult es mean
-mean_cult <- mean(es_raster[[c(1, 7, 9)]])
-#reg es mean
-mean_reg <- mean(es_raster[[c(2, 4, 5)]])
+mean_prov <- mean(es_raster[[es_groups$provisioning]])
+mean_reg  <- mean(es_raster[[es_groups$regulating]])
+mean_cult <- mean(es_raster[[es_groups$regulating]])
 
 ## Ecosystem condition (cookbook nr.2)
-es_cond<-terra::rast(paste0(main_dir,"WP4/features/",siteID,"_ec.tif"))
+es_cond<-terra::rast(paste0("data/WP4/",target_site,"_ec.tif"))
 
 ### costs
 ##based on ecosystem service exclusiveness
-cost_es<-terra::rast(paste0(main_dir,"WP4/cost_raster_es/",siteID,"_cost_raster_es.tif"))
+cost_es<-terra::rast(paste0("data/WP4/",target_site,"_cost_raster_es.tif"))
 ## based on policy coherence (cookbook nr. 3)
-cost_policy<-terra::rast(paste0(main_dir,"WP4/cost_raster_policy/",siteID,"_cost_raster_pol.tif"))
+cost_policy_file <- file.path(
+  "data/WP4/",
+  paste0(target_site, "_cost_raster_pol.tif")
+)
+
+cost_policy <- if (file.exists(cost_policy_file)) {
+  terra::rast(cost_policy_file)
+} else {
+  NULL
+}
 
 
 target_crs<-st_crs(grid)$wkt
@@ -49,7 +62,7 @@ rasters <- list(
   eco_cond = es_cond
 )
 
-rasters <- lapply(rasters, project, y = target_crs)
+rasters <- Filter(Negate(is.null), rasters)
 
 list2env(rasters, envir = environment())
 
@@ -59,21 +72,39 @@ grid[paste0("sampled_", names(rasters))] <-
   )
 
 #calculate distance from cells outside core PA to core PA as defined in step 01_pa_status.R
-out   <- grid%>%filter(exisiting_corePA == F)
-pa_core <- grid%>%filter(exisiting_corePA == T)
+out   <- grid%>%filter(existing_corePA == F)
+pa_core <- grid%>%filter(existing_corePA == T)
 
 out$min_distance <- apply(st_distance(out, pa_core), 1, min)
 pa_core$min_distance<-0
 grid<-rbind(out,pa_core)
 
 ## remove na grid cells based on features and costs (not)
-grid_clean <- grid %>%
-  filter(!if_any(all_of(c("sampled_grand_mean_es","sampled_es_cult","sampled_es_prov","sampled_es_reg","sampled_cost_es","sampled_cost_policy","sampled_eco_cond")), ~ is.na(.) | is.nan(.)))
+cols_to_check <- c(
+  "sampled_grand_mean_es",
+  "sampled_es_cult",
+  "sampled_es_prov",
+  "sampled_es_reg",
+  "sampled_cost_es",
+  "sampled_eco_cond"
+)
 
-grid_clean<- zero_one_scale(
+if ("sampled_cost_policy" %in% names(grid)) {
+  cols_to_check <- c(cols_to_check, "sampled_cost_policy")
+}
+
+grid_clean <- grid %>%
+  filter(!if_any(all_of(cols_to_check), ~ is.na(.) | is.nan(.)))
+
+## scale
+if ("sampled_cost_policy" %in% names(grid_clean)) {
+  cols_to_check <- c(cols_to_check, "sampled_cost_policy")
+}
+
+grid_clean <- zero_one_scale(
   grid_clean,
-  cols = c("sampled_grand_mean_es","sampled_es_cult","sampled_es_prov","sampled_es_reg","sampled_cost_es","sampled_eco_cond","min_distance")
+  cols = cols_to_check
 )
 
 
-st_write(grid_clean, paste0("WP4/2_output/02_optim/",siteID,"_input_final_grid.json"), driver = "GeoJSON", overwrite = T)
+st_write(grid_clean, paste0("outputs/WP4/02_optim/",target_site,"_input_final_grid.json"), driver = "GeoJSON", overwrite = T)

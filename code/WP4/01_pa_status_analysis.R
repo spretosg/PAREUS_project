@@ -5,9 +5,8 @@ library(terra)
 library(dplyr)
 library(ggplot2)
 library(tidyr)
-source("WP4/1_code/wp4_functions_utils.R")
-siteID<-"FRL04"
-main_dir<-"P:/312204_pareus/"
+source("code/WP4/wp4_functions_utils.R")
+target_site<-"SK021"
 
 ####---- User parameter ----####
 #Parameters to set, ev to develop in collaboration with stakeholders
@@ -20,11 +19,11 @@ PU_size<-1200 #lin m2 lower number increase the resolution but increase also com
 
 ####---- Input and processing ----####
 # study area
-stud_area<-read_sf(paste0(main_dir,"WP2/T2.2/PGIS_ES_mapping/",siteID,"/raw_data_backup/study_site.gpkg"))
+stud_area<-read_sf("data/shared/pareus_sites.gpkg")%>%filter(siteID == target_site)
 # LULC raster
-lulc<-terra::rast(paste0(main_dir,"WP4/habitat/",siteID,"_lulc.tif"))
+lulc<-terra::rast(paste0("data/shared/",target_site,"_lulc.tif"))
 # current PA network
-PA<-st_read(paste0(main_dir,"WP4/pa_existing/WDPA_",siteID,".shp"))
+PA<-st_read(paste0("data/WP4/WDPA_",target_site,".gpkg"))
 
 ## spatial transformation
 target_crs<-25833
@@ -33,7 +32,6 @@ lulc <- project(lulc, paste0("epsg:",target_crs))
 PA<-st_transform(PA,st_crs(target_crs))
 
 #crop to study area
-stud_area<-stud_area%>%filter(siteID=="FRL04")
 lulc <- crop(lulc, vect(stud_area))
 lulc <- mask(lulc, vect(stud_area))
 PA <- PA%>%st_intersection(stud_area)%>%st_make_valid()
@@ -104,7 +102,7 @@ grid <- grid %>%
     existing_corePA = IUCN_CAT %in% core_PA
   )
 # write grid for further processing
-st_write(grid, paste0("WP4/2_output/01_PA_analysis/",siteID,"_input_grid.json"), driver = "GeoJSON", overwrite = T)
+st_write(grid, paste0("outputs/WP4/01_PA_analysis/",target_site,"_input_grid.json"), driver = "GeoJSON", overwrite = T)
 
 ####---- Protection analysis ----####
 p<-ggplot() +
@@ -121,7 +119,7 @@ p<-ggplot() +
   geom_sf(data = stud_area, fill = NA, color = "black") +
   theme_minimal()+
   theme(text = element_text(size = 20))
-ggsave(paste0("WP4/2_output/01_PA_analysis/",siteID,"_n_pa.png"), plot = p, width = 8, height = 6, dpi = 300)
+ggsave(paste0("outputs/WP4/01_PA_analysis/",target_site,"_n_pa.png"), plot = p, width = 8, height = 6, dpi = 300)
 
 # PA classes
 p<-ggplot() +
@@ -144,7 +142,7 @@ p<-ggplot() +
   )+
   geom_sf(data = stud_area, fill = NA, color = "black") +
   theme_minimal()
-ggsave(paste0("WP4/2_output/01_PA_analysis/",siteID,"_IUCN.png"), plot = p, dpi = 300)
+ggsave(paste0("outputs/WP4/01_PA_analysis/",target_site,"_IUCN.png"), plot = p, dpi = 300)
 
 ## area protected class
 p<-ggplot(grid%>%filter(!is.na(IUCN_CAT)),
@@ -159,7 +157,7 @@ p<-ggplot(grid%>%filter(!is.na(IUCN_CAT)),
   theme_minimal() +
   theme(text = element_text(size = 20))
 
-ggsave(paste0("WP4/2_output/01_PA_analysis/",siteID,"_area_stats_IUCN.png"), plot = p, width = 8, height = 6, dpi = 300)
+ggsave(paste0("outputs/WP4/01_PA_analysis/",target_site,"_area_stats_IUCN.png"), plot = p, width = 8, height = 6, dpi = 300)
 
 
 ####---- Protection gap analysis ----####
@@ -167,7 +165,7 @@ ggsave(paste0("WP4/2_output/01_PA_analysis/",siteID,"_area_stats_IUCN.png"), plo
 gap_glob <- protection_gap(
   grid,
   lulc_col = "lulc_name",
-  corePA_col = "exisiting_corePA",
+  corePA_col = "existing_corePA",
   lockout = "built-up",
   mode = "global",
   target = target_glob
@@ -176,14 +174,14 @@ gap_glob <- protection_gap(
 gap_lulc <- protection_gap(
   grid,
   lulc_col = "lulc_name",
-  corePA_col = "exisiting_corePA",
+  corePA_col = "existing_corePA",
   lockout = "built-up",
   mode = "class",
   target = target_lulc
 )
 
 gap<-rbind(gap_lulc,gap_glob)%>%filter(!is.na(lulc_name))
-write.csv(gap,paste0("WP4/2_output/01_PA_analysis/",siteID,"_gap_analysis.csv"))
+write.csv(gap,paste0("outputs/WP4/01_PA_analysis/",target_site,"_gap_analysis.csv"))
 ### gap plot
 
 gap_plot <- gap %>%
@@ -194,7 +192,7 @@ gap_plot <- gap %>%
     values_to = "area"
   )
 
-ggplot(gap_plot,
+gap<-ggplot(gap_plot,
        aes(y = reorder(lulc_name, area),
            x = area/1e6,
            fill = status)) +
@@ -218,4 +216,4 @@ ggplot(gap_plot,
     panel.grid.major.y = element_blank()
   )
 
-ggsave(paste0("WP4/2_output/01_PA_analysis/",siteID,"_gap.png"), plot = p, width = 8, height = 6, dpi = 300)
+ggsave(paste0("outputs/WP4/01_PA_analysis/",target_site,"_gap.png"), plot = gap, width = 8, height = 6, dpi = 300)

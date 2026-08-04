@@ -7,15 +7,20 @@ library(terra)
 library(ggnewscale)
 library(tidyverse)
 
-source("WP4/1_code/wp4_functions_utils.R")
-main_dir<-"P:/312204_pareus/"
-siteID<-"FRL04"
+source("code/WP4/wp4_functions_utils.R")
+
+target_site<-"SK021"
 ####---- User parameter ----####
 # weighting of OECM suitability raster components
-w_cult = 0.05
-w_prov =0.05
-w_ec = 0.45
-w_connect = 0.45
+# w_cult = 0.05
+# w_prov =0.05
+# w_ec = 0.45
+# w_connect = 0.45
+w_cult = 0.25
+w_prov =0.25
+w_ec = 0.25
+w_connect = 0.25
+
 
 coverage <- c(
   forests = 0.15,
@@ -25,13 +30,13 @@ coverage <- c(
 )
 
 ####---- Input and processing ----####
-stud_area<-read_sf(paste0(main_dir,"WP2/T2.2/PGIS_ES_mapping/",siteID,"/raw_data_backup/study_site.gpkg"))
-stud_area<-stud_area%>%filter(siteID=="FRL04")
+stud_area<-read_sf(paste0("data/shared/pareus_sites.gpkg"))%>%filter(siteID == target_site)
+
 # PUs containing the optimized core PA
-pu<-st_read(paste0("WP4/2_output/02_optim/PA_optim_grid",siteID,".geojson"))
+pu<-st_read(paste0("outputs/WP4/02_optim/PA_optim_grid_",target_site,".geojson"))
 
 #connectivity raster (run 00_helper_connectivity.R first)
-connectivity<-rast(paste0("WP4/2_output/02_optim/mw_connectivity_",siteID,".tif"))
+connectivity<-rast(paste0("outputs/WP4/02_optim/mw_connectivity_",target_site,".tif"))
 
 # sample connetivity values to pu
 pu$connectivity<- terra::extract(connectivity$normalized_current, pu, fun = mean, na.rm = TRUE)[,2]
@@ -44,28 +49,28 @@ pu<-zero_one_scale(
 
 ####---- Linear combination for OECM suitability ----####
 ## check correlation of MCDA variables
-vars <- c("sampled_es_cult_scaled", "sampled_es_prov_scaled", "sampled_eco_cond_scaled", "connectivity_scaled")
+#vars <- c("sampled_es_cult_scaled", "sampled_es_prov_scaled", "sampled_eco_cond_scaled", "connectivity_scaled")
 
-cor_mat <- pu %>%
-  st_drop_geometry() %>%
-  dplyr::select(dplyr::all_of(vars)) %>%
-  cor(use = "pairwise.complete.obs")
-
-corrplot::corrplot(
-  cor_mat,
-  method = "color",
-  type = "upper",
-  addCoef.col = "black",   # show r values
-  number.cex = 0.8,        # size of r values
-  tl.col = "black",
-  tl.srt = 45,
-  diag = FALSE
-)
+# cor_mat <- pu %>%
+#   st_drop_geometry() %>%
+#   dplyr::select(dplyr::all_of(vars)) %>%
+#   cor(use = "pairwise.complete.obs")
+# 
+# corrplot::corrplot(
+#   cor_mat,
+#   method = "color",
+#   type = "upper",
+#   addCoef.col = "black",   # show r values
+#   number.cex = 0.8,        # size of r values
+#   tl.col = "black",
+#   tl.srt = 45,
+#   diag = FALSE
+# )
 
 pu$oecm_suit<-oecm_lin_w(pu$sampled_es_cult_scaled,pu$sampled_es_prov_scaled,
                          pu$sampled_eco_cond_scaled,pu$connectivity_scaled,w_cult,w_prov,w_ec,w_connect)
 
-ggplot(pu %>% filter(!exisiting_corePA)) +
+ggplot(pu %>% filter(!existing_corePA)) +
   geom_sf(aes(fill = oecm_suit), color = NA) +
   scale_fill_gradientn(
     colours = c(
@@ -143,7 +148,7 @@ base_glob<-plot_pca_map(pu=pu,
                 stud_area,
                 scen = "BASE_GLOB",
                 save_output = T)
-st_write(pu,paste0("WP4/2_output/03_pca_landscape/PCA_final",siteID,".geojson"))
+st_write(pu,paste0("outputs/WP4/03_pca_landscape/PCA_final",target_site,".geojson"))
 
 stats_all<-rbind(base_lulc$stats,nat_lulc$stats,nat_glob$stats, base_glob$stats)
 stats_all$pa_group[stats_all$pa_group == "Other PA (IUCN III-VI) high suitability for OECM"] <- "other_pa"

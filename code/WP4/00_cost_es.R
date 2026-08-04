@@ -33,18 +33,7 @@ for(i in 1: nrow(comb)){
   print(i/nrow(comb))
   left<-as.character(a$Var1)
   right<-as.character(a$Var2)
-  # select the others
-  #nlayers <- min(nlyr(get(left)), nlyr(get(right)))
-  # rank1 <- app(get(left), rank)
-  # rank2 <- app(get(right), rank)
-  # right <- rank1[[1:nlayers]]
-  # left <- rank2[[1:nlayers]]
-  # 
-  # sji <- app(c(right, left), fun = function(x) {
-  #   n <- length(x) / 2
-  #   #print(n)
-  #   cor(x[1:n], x[(n+1):(2*n)], method = "pearson")
-  # })
+
   l_raster <- mean_rast[[left]]
   r_raster <- mean_rast[[right]]
   tmp_cor_rast<-c(l_raster,r_raster)

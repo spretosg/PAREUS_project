@@ -2,18 +2,14 @@ library(circuitscaper)
 #cs_install_julia()
 Sys.which("julia")
 system("julia --version")
-#cs_setup(threads = 4)
-
-# library(prioritizr)
 library(ggplot2)
 library(sf)
 library(terra)
 library(dplyr)
-# library(gdistance)
 
-source("WP4/1_code/wp4_functions_utils.R")
-main_dir<-"P:/312204_pareus/"
-siteID<-"FRL04"
+source("code/WP4/wp4_functions_utils.R")
+
+target_site<-"SK021"
 ####---- user parameter ----####
 ##factors to multiply the ecosystem condition resistance for movement based on LULC classes 
 ## higher values == easier to move through area general assumptions
@@ -26,11 +22,10 @@ factors <- data.frame(
 agg_factor = 1
 
 ####---- Input and processing ----####
-stud_area<-read_sf(paste0(main_dir,"WP2/T2.2/PGIS_ES_mapping/",siteID,"/raw_data_backup/study_site.gpkg"))
-stud_area<-stud_area%>%filter(siteID=="FRL04")
+stud_area<-read_sf(paste0("data/shared/pareus_sites.gpkg"))%>%filter(siteID == target_site)
 # ecosystem condition and landcover
-es_cond<-rast(paste0(main_dir,"WP4/features/",siteID,"_ec.tif"))
-lulc<-rast(paste0(main_dir,"WP2/T2.2/PGIS_ES_mapping/",siteID,"/raw_data_backup/2_env_var/lulc.tif"))
+es_cond<-rast(paste0("data/WP4/",target_site,"_ec.tif"))
+lulc<-rast(paste0("data/shared/",target_site,"_lulc.tif"))
 
 lulc[lulc == 0] <- NA
 lulc <- trunc(lulc / 100)
@@ -59,4 +54,4 @@ start<-Sys.time()
 mw_result <- os_run(r_coarse, radius = 20, block_size = 10)
 plot(mw_result$normalized_current)
 print(Sys.time()-start)
-writeRaster(mw_result,paste0("WP4/2_output/02_optim/mw_connectivity_",siteID,".tif"))
+writeRaster(mw_result,paste0("outputs/WP4/02_optim/mw_connectivity_",target_site,".tif"))

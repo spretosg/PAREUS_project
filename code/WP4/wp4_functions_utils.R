@@ -76,50 +76,49 @@ protection_gap <- function(x,
 }
 
 
-pa_optim<-function(pu,
-                   target_lulc = NULL,
-                   lockout = NULL,
-                   lockin_col,
-                   features,
-                   area_budget
-){
-  #filter out lockout e.g. built-up
+pa_optim <- function(
+    pu,
+    target_lulc = NULL,
+    lockout = NULL,
+    lockin_col,
+    features,
+    area_budget
+) {
+  
+  # Filter out lockout classes
   if (!is.null(lockout)) {
     pu <- pu %>%
-      filter(!(.data[["lulc_name"]] %in%lockout))
-  }
-  #subset
-  if(!is.null(target_lulc)){
-    pu<-pu %>% filter(.data[["lulc_name"]] == target_lulc)
+      filter(!(.data$lulc_name %in% lockout))
   }
   
+  # Filter target LULC
+  if (!is.null(target_lulc)) {
+    pu <- pu %>%
+      filter(.data$lulc_name == target_lulc)
+  }
   
-  pa_problem<- problem(
+  # Nothing to optimize
+  if (nrow(pu) == 0) {
+    return(NULL)
+  }
+  
+  pa_problem <- problem(
     pu,
     features = features,
-    cost_column = "area_km2" # Cost is set to area to enforce the area budget
+    cost_column = "area_km2"
   ) %>%
-    # Maximizes feature values strictly within your 30% area budget
     add_max_utility_objective(budget = area_budget) %>%
-    # add_locked_out_constraints("lock_out")%>%
-    add_boundary_penalties(penalty = 0.0005) %>% 
-    
-    # Ensures planning units are either completely selected (1) or not (0)
+    add_boundary_penalties(penalty = 0.0005) %>%
     add_binary_decisions()
   
-  #in case already protected area present, add lockin
-  if(nrow(pu%>%filter(.data[[lockin_col]]==T)) !=0){
-    
-    pa_problem<-pa_problem %>% add_locked_in_constraints(lockin_col)
+  if (lockin_col %in% names(pu) &&
+      any(pu[[lockin_col]], na.rm = TRUE)) {
+    pa_problem <- pa_problem %>%
+      add_locked_in_constraints(lockin_col)
   }
   
-  optim_pa <- solve(pa_problem) 
-  # plot(
-  #   st_as_sf(optim_pa[, "solution_1"]), main = "Prioritization",
-  #   pal = c("grey90", "darkgreen")
-  # )
-
-  return(optim_pa%>%filter(solution_1==1))
+  solve(pa_problem) %>%
+    filter(solution_1 == 1)
 }
 
 
@@ -262,10 +261,10 @@ plot_pca_map<-function(pu,
 
   
   pu_pca<-rbind(other,oecm,no_oecm_pa,core_pa)
-  pu_pca<-pu_pca%>%select(id,lulc_name, sampled_es_reg_scaled,sampled_es_prov_scaled,sampled_es_cult_scaled,sampled_grand_mean_es_scaled, sampled_eco_cond_scaled, sampled_cost_policy,connectivity_scaled,area,pca)
+  pu_pca<-pu_pca%>%select(id,lulc_name, sampled_es_reg_scaled,sampled_es_prov_scaled,sampled_es_cult_scaled,sampled_grand_mean_es_scaled, sampled_eco_cond_scaled, sampled_cost_es,connectivity_scaled,area,pca)
   
   if(save_output == T){
-    st_write(pu_pca,paste0("WP4/2_output/03_pca_landscape/PCA_PU_",siteID,"_",scen,".geojson"))
+    st_write(pu_pca,paste0("outputs/WP4/03_pca_landscape/PCA_PU_",target_site,"_",scen,".geojson"))
   }
   
   stats<-pu_pca%>%group_by(pca,lulc_name)%>%summarise(area = sum(area))%>%st_drop_geometry()%>%mutate(scenario = scen)

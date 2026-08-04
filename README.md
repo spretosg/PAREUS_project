@@ -110,10 +110,11 @@ Research datasets are archived in a trusted repository and assigned persistent D
 
 | WP | Repository | DOI |
 |----|------------|-----|
-| WP1 | Zenodo | DOI |
-| WP2 | Dataverse | DOI |
-| WP3 | Zenodo | DOI |
-| WP4 | Institutional repository | DOI |
+| shared | Dataverse | doi:10.7910/DVN/H4MLO0 |
+| WP1 | Dataverse | DOI |
+| WP2 | Dataverse | doi:10.7910/DVN/NUIUHG |
+| WP3 | Dataverse | DOI |
+| WP4 | Dataverse | doi:10.7910/DVN/854MZQ |
 
 Detailed metadata and download instructions are provided in the corresponding `data/WP*/README.md`.
 
