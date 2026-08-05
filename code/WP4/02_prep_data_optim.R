@@ -16,7 +16,7 @@ grid<-st_read(paste0("outputs/WP4/01_PA_analysis/",target_site,"_input_grid.json
 
 ### Features
 ## Mean ecosystem service (cookbook nr.2)
-grand_mean_es<-terra::rast(paste0("data/WP4/mean_es_",target_site,".tif"))
+grand_mean_es<-terra::rast(paste0("data/WP2/",target_site,"_Wmean.tif"))
 # ES groups
 es_raster <- rast(paste0("data/WP4/es_individual_",target_site,".tif"))
 
@@ -32,7 +32,7 @@ mean_reg  <- mean(es_raster[[es_groups$regulating]])
 mean_cult <- mean(es_raster[[es_groups$regulating]])
 
 ## Ecosystem condition (cookbook nr.2)
-es_cond<-terra::rast(paste0("data/WP4/",target_site,"_ec.tif"))
+es_cond<-terra::rast(paste0("data/WP2/",target_site,"_ECSI.tif"))
 
 ### costs
 ##based on ecosystem service exclusiveness

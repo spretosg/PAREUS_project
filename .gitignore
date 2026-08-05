@@ -20,6 +20,9 @@ data/**/*.nc
 data/**/*.zip
 data/**/*.tab
 
+**outputs/
+**data/
+
 # Keep metadata
 !data/**/README.md
 !data/**/datasets.csv

@@ -28,3 +28,21 @@ for (k in seq_len(nrow(catalogue))) {
     )
   }
 }
+
+## create intermediate storage folders
+dirs <- c(
+  "outputs",
+  "outputs/WP1",
+  "outputs/WP2",
+  "outputs/WP3",
+  "outputs/WP4",
+  "outputs/WP4/01_PA_analysis",
+  "outputs/WP4/02_optim",
+  "outputs/WP4/03_pca_landscape"
+)
+
+for (d in dirs) {
+  if (!dir.exists(d)) {
+    dir.create(d, recursive = TRUE)
+  }
+}
