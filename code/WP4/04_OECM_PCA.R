@@ -1,4 +1,8 @@
-### OECM suitability
+############################################################################
+# Pareus WP4 - OECM and PCA landscape
+# Date: 06.08.2026
+# Author: Reto Spielhofer (Norwegian Institute for Nature Research)
+############################################################################
 library(ggpubr)
 library(sf)
 library(dplyr)

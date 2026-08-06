@@ -1,4 +1,8 @@
-# GAP analysis
+############################################################################
+# Pareus WP4 - Protected area analysis
+# Date: 06.08.2026
+# Author: Reto Spielhofer (Norwegian Institute for Nature Research)
+############################################################################
 #how much of each natural land cover type is protected through IUCN cat Ia and II?
 library(sf)
 library(terra)

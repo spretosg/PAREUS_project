@@ -1,6 +1,8 @@
-## test data read tif
-## make pu of stud area
-## sample cost, es_cond and es_capacity per PU
+############################################################################
+# Pareus WP4 - Prepare data for PA optimization
+# Date: 06.08.2026
+# Author: Reto Spielhofer (Norwegian Institute for Nature Research)
+############################################################################
 
 library(sf)
 library(terra)

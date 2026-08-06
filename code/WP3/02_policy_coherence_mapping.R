@@ -1,4 +1,8 @@
-# policy mapping
+############################################################################
+# Pareus WP3 - mapping policy coherence
+# Date: 06.08.2026
+# Author: Reto Spielhofer (Norwegian Institute for Nature Research)
+############################################################################
 # takes a land cover map and the policy coherence data
 
 library(terra)

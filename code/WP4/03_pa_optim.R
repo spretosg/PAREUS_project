@@ -1,4 +1,8 @@
-# test prioritizr
+############################################################################
+# Pareus WP4 - PA optimization
+# Date: 06.08.2026
+# Author: Reto Spielhofer (Norwegian Institute for Nature Research)
+############################################################################
 library(prioritizr)
 library(ggplot2)
 library(sf)
