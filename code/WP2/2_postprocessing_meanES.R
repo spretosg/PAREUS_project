@@ -1,5 +1,4 @@
 ### calculate mean raster per ES
-
 library(terra)
 library(sf)
 library(dplyr)
@@ -7,17 +6,10 @@ library(spatstat.geom)
 library(spatstat.model)
 source("WP2/wp2_functions_utils.R")
 stud_id<-"TRD"
-main_dir<-paste0("P:/312204_pareus/WP2/T2.2/PGIS_ES_mapping/",stud_id,"/raw_data_backup")
-eval_round<-"R1" #R2
-
-if(eval_round == "R1"){
-  target_dir<-"/3_ind_R1"
-}else{
-  target_dir <-"/5_ind_R2"
-}
+main_dir<-paste0("P:/312204_pareus/pareus_repository/WP2/")
 
 
-es_ratings<-read.csv(paste0(main_dir,"/ahp_weights.csv"))
+es_ratings<-read.csv(paste0(main_dir,"/weights_all.csv"),sep=";")
 
 # List the first 10 subfolders
 subfolders <- list.dirs(paste0(main_dir,target_dir), full.names = TRUE, recursive = FALSE)[1:10]

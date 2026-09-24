@@ -10,31 +10,33 @@ library(terra)
 library(dplyr)
 source("code/WP4/wp4_functions_utils.R")
 
-target_site<-"SK021"
-has_pol_cost<-F
+target_site<-"FRA"
 
-if(has_pol_cost){
-  features<-c("sampled_eco_cond_scaled","sampled_es_reg_scaled","inv_cost_pol","inv_dist")
-}else{
-  features<-c("sampled_eco_cond_scaled","sampled_es_reg_scaled","inv_cost_es_scaled","inv_dist")
-}
+#restrictive optimization scenario
+#maximize ecosystem condition, regulation, minimize policy costs, cultural and provisioning services
+#features<-c("sampled_eco_cond_scaled","sampled_es_reg_scaled","inv_cost_pol","inv_prov_scaled","inv_cult_scaled")
 
+
+#intermediate scenario
+#features<-c("sampled_eco_cond_scaled","sampled_es_reg_scaled","inv_cost_pol")
+
+
+#low nature
+features<-c("sampled_eco_cond_scaled","sampled_es_reg_scaled","inv_cost_pol","sampled_es_prov_scaled","sampled_es_cult_scaled")
 
 
 ####---- Input and processing ----####
 # defined gaps in 01_pa_status_analysis.R
 gap<-read.csv(paste0("outputs/WP4/01_PA_analysis/",target_site,"_gap_analysis.csv"))
 
-stud_area<-read_sf(paste0("data/shared/pareus_sites.gpkg"))%>%filter(siteID == target_site)
+stud_area<-read_sf(paste0("data/shared/",target_site,".gpkg"))
 # planning units
 pu<-st_read(paste0("outputs/WP4/02_optim/",target_site,"_input_final_grid.json"))
 
 ## inverse the costs since MARXAN takes maximization only
-if(has_pol_cost){
-  pu$inv_cost_pol<-1/pu$sampled_cost_pol
-}else{
-  pu$inv_cost_es<-1/pu$sampled_cost_es
-}
+pu$inv_cost_pol<-1/pu$sampled_cost_policy
+pu$inv_prov<-1/pu$sampled_es_prov_scaled
+pu$inv_cult<-1/pu$sampled_es_cult_scaled
 
 
 pu<-pu%>%mutate(inv_dist = case_when(
@@ -43,18 +45,10 @@ pu<-pu%>%mutate(inv_dist = case_when(
 ))
 
 
-if(has_pol_cost){
-  pu<-zero_one_scale(
+pu<-zero_one_scale(
     pu,
-    cols = c("inv_dist", "inv_cost_pol")
+    cols = c("inv_dist", "inv_cost_pol","inv_prov","inv_cult"),na.rm = T
   )
-}else{
-  pu<-zero_one_scale(
-    pu,
-    cols = c("inv_dist", "inv_cost_es")
-  )
-}
-
 
 # remove partial PUs (otherwise area standardization of features and cost needed)
 pu$area_km2<-pu$area/10^6
@@ -62,8 +56,10 @@ pu<-pu%>%filter(area_km2 > 1.2)
 
 ####---- Optimization and data merge ----####
 # For each lulc run an optimization and one for the global scenario
-lulcs_to_optimize <- c("forest", "water", "wetland", "agricultural")
+#lulcs_to_optimize <- c("forest", "water", "wetland", "agricultural")
+lulcs_to_optimize <- c("forest", "water", "wetland")
 
+t0<-Sys.time()
 PA_single_lulc <- lapply(lulcs_to_optimize, \(x)
                          pa_optim(
                            pu = pu,
@@ -74,9 +70,13 @@ PA_single_lulc <- lapply(lulcs_to_optimize, \(x)
                          )
 ) %>%
   dplyr::bind_rows()
+Sys.time()-t0
 
+t0<-Sys.time()
+core_pa_global<-pa_optim(pu=pu,lockout = c("built-up","agricultural"),lockin_col="existing_corePA", features =features, 
+                         area_budget = gap[gap$lulc_name == "global_0.1_prot", ]$target_area/10^6)
 
-core_pa_global<-pa_optim(pu=pu,lockout = "built-up",lockin_col="existing_corePA", features =features, area_budget = gap[gap$lulc_name == "global_0.1_prot", ]$target_area/10^6)
+Sys.time()-t0
 
 pu <- pu %>%
   left_join(PA_single_lulc %>%st_drop_geometry()%>% dplyr::select(id, solution_1),
@@ -148,14 +148,14 @@ cols <- c(
 )
 
 map_pa <- ggplot(pu) +
-  geom_sf(aes(fill = core_pa_lulc), color = NA) +
+  geom_sf(aes(fill = core_pa_global), color = NA) +
   scale_fill_manual(values = cols, name = NULL, na.translate = FALSE) +
   geom_sf(data = stud_area, fill = NA, color = "black") +
   theme_minimal()+
   theme(
     legend.position = "top",
     text = element_text(size = 15)
-  )+ggtitle("PA LULC")
+  )+ggtitle("Global")
 
 ggsave(paste0("outputs/WP4/02_optim/",target_site,"_pa_global_optim.png"), plot = map_pa, width = 18, height = 10, dpi = 300)
 

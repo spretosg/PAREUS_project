@@ -10,7 +10,7 @@ library(dplyr)
 library(ggplot2)
 library(tidyr)
 source("code/WP4/wp4_functions_utils.R")
-target_site<-"SK021"
+target_site<-"FRA"
 
 ####---- User parameter ----####
 #Parameters to set, ev to develop in collaboration with stakeholders
@@ -23,7 +23,7 @@ PU_size<-1200 #lin m2 lower number increase the resolution but increase also com
 
 ####---- Input and processing ----####
 # study area
-stud_area<-read_sf("data/shared/pareus_sites.gpkg")%>%filter(siteID == target_site)
+stud_area<-read_sf(paste0("data/shared/",target_site,".gpkg"))
 # LULC raster
 lulc<-terra::rast(paste0("data/shared/",target_site,"_lulc.tif"))
 # current PA network
@@ -44,7 +44,7 @@ PA <- PA%>%st_intersection(stud_area)%>%st_make_valid()
 grid <- stud_area %>%
   st_make_grid(cellsize = PU_size, square = FALSE) %>%
   st_sf(geometry = ., id = seq_along(.)) %>%
-  st_intersection(stud_area["siteID"])
+  st_intersection(stud_area)
 
 grid$area<-as.numeric(st_area(grid))
 

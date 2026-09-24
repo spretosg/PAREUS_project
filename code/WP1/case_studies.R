@@ -6,9 +6,16 @@ library(rnaturalearth)
 library(rnaturalearthdata)
 library(patchwork)
 
-main_dir<-"P:/312204_pareus/"
+# 1. Install and load the modern package
+#install.packages("giscoR")
+library(giscoR)
 
-sites<-st_read(paste0(main_dir,"pareus_repository/pareus_sites.gpkg"))
+# Download national boundary of France
+sites <- gisco_get_nuts(year = "2024", nuts_id = c("FRL0","SK021","NO06"))
+# 
+# main_dir<-"P:/312204_pareus/"
+# 
+# sites<-sf::st_read(paste0(main_dir,"pareus_repository/shared/pareus_sites.gpkg"))
 
 sites<-st_make_valid(sites)
 # Label positions (centroids)
@@ -17,8 +24,8 @@ sf::sf_use_s2(FALSE)
 labels <- sites %>%
   st_centroid() %>%
   mutate(
-    x = c(17, 5, 5, 11.2),
-    y = c(47.5, 43, 45.4, 64.0)
+    x = c(11.2,  6, 18),
+    y = c(65.5, 45.7, 49.5)
   )
 
 sf::sf_use_s2(TRUE)
@@ -30,6 +37,8 @@ europe <- ne_countries(
   returnclass = "sf"
 )
 
+# sites<-sites%>%filter(siteID %in% c("SK021","TRD","FRA"))
+# sites<-st_collection_extract(sites, "POLYGON")
 
 ggplot() +
   # Sea
@@ -61,7 +70,7 @@ ggplot() +
   # Labels
   geom_text(
     data = labels,
-    aes(x, y, label = siteID),
+    aes(x, y, label = CNTR_CODE),
     fontface = "bold",
     size = 3.5
   ) +
