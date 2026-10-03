@@ -9,7 +9,7 @@ library(terra)
 library(dplyr)
 library(ggplot2)
 source("code/WP4/wp4_functions_utils.R")
-target_site<-"FRA"
+target_site<-"TRD"
 
 
 ####---- Input and processing ----####
@@ -49,9 +49,9 @@ mean_prov
 mean_cult
 mean_reg
 
-# writeRaster(mean_prov,paste0("data/WP4/prov_",target_site,".tif"))
-# writeRaster(mean_reg,paste0("data/WP4/reg_",target_site,".tif"))
-# writeRaster(mean_cult,paste0("data/WP4/cult_",target_site,".tif"))
+writeRaster(mean_prov,paste0("data/WP4/prov_",target_site,".tif"))
+writeRaster(mean_reg,paste0("data/WP4/reg_",target_site,".tif"))
+writeRaster(mean_cult,paste0("data/WP4/cult_",target_site,".tif"))
 
 ## Ecosystem condition (cookbook nr.2)
 es_cond<-terra::rast(paste0("data/WP2/",target_site,"/int.tif"))
@@ -66,12 +66,17 @@ cost_policy<-rast(cost_policy_file)
 
 target_crs<-st_crs(grid)$wkt
 
+## human pressure
+ghm<-terra::rast(paste0("data/WP4/",target_site,"_GHM.tif"))
+
+
 rasters <- list(
   cost_policy   = cost_policy,
   es_cult       = mean_cult,
   es_reg        = mean_reg,
   es_prov       = mean_prov,
-  eco_cond = es_cond
+  eco_cond = es_cond,
+  ghm = ghm
 )
 
 rasters <- Filter(Negate(is.null), rasters)
@@ -97,7 +102,8 @@ cols_to_check <- c(
   "sampled_es_prov",
   "sampled_es_reg",
   "sampled_eco_cond",
-  "sampled_cost_policy"
+  "sampled_cost_policy",
+  "sampled_ghm"
 )
 
 if ("sampled_cost_policy" %in% names(grid)) {
@@ -107,15 +113,11 @@ if ("sampled_cost_policy" %in% names(grid)) {
 grid_clean <- grid %>%
   filter(!if_any(all_of(cols_to_check), ~ is.na(.) | is.nan(.)))
 
-## scale
-if ("sampled_cost_policy" %in% names(grid_clean)) {
-  cols_to_check <- c(cols_to_check, "sampled_cost_policy")
-}
+
 
 grid_clean <- zero_one_scale(
   grid_clean,
   cols = cols_to_check
 )
-
 
 st_write(grid_clean, paste0("outputs/WP4/02_optim/",target_site,"_input_final_grid.json"), driver = "GeoJSON", overwrite = T)

@@ -9,7 +9,7 @@ library(dplyr)
 
 source("code/WP4/wp4_functions_utils.R")
 
-target_site<-"FRA"
+target_site<-"TRD"
 ####---- user parameter ----####
 ##factors to multiply the ecosystem condition resistance for movement based on LULC classes 
 ## higher values == easier to move through area general assumptions
@@ -54,7 +54,7 @@ r_coarse[r_coarse <= 0] <- 0.001
 
 # calculate moving window connectivity based on ecosystem condition in landscape
 start<-Sys.time()
-mw_result <- os_run(r_coarse, radius = 40, block_size = 20)
+mw_result <- os_run(r_coarse, radius = 30, block_size = 15)
 plot(mw_result$normalized_current)
 print(Sys.time()-start)
 mw_result<-min_max_normalize(mw_result$normalized_current)

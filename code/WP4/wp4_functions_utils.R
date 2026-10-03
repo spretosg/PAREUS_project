@@ -178,57 +178,45 @@ oecm_lin_w<-function(cult_es,prov_es,ec,conn,w_cult,w_prov,w_ec,w_connect){
 }
 
 
+smooth_suitability <- function(dat, suitability_col, w = 0.5, order = 1) {
+  nb <- st_touches(dat)                      # neighbours among eligible PUs
+  s  <- dat[[suitability_col]]
+  for (k in seq_len(order)) {                # order > 1 = wider smoothing
+    nb_mean <- vapply(seq_along(nb), function(i)
+      if (length(nb[[i]])) mean(s[nb[[i]]]) else s[i], numeric(1))
+    s <- (1 - w) * s + w * nb_mean
+  }
+  s
+}
+
 ## oecm selection function either global % highest oecm suitability, or per LULC % of highest suitability
-select_oecm <- function(pu,
-                        mode = c("class", "global"),
-                        coverage,
+select_oecm <- function(pu, mode = c("class", "global"), coverage,
                         lulc_col = "lulc",
                         suitability_col = "oecm_suitability",
                         corePA_col = "core_pa_lulc",
-                        search_oecm_in = c("not protected","other protected areas")) {
-  
+                        search_oecm_in = c("not protected", "other protected areas"),
+                        w = 0.7, order = 1) {
   mode <- match.arg(mode)
   
-  dat <- pu
+  dat <- pu %>% filter(.data[[corePA_col]] %in% search_oecm_in)
+  dat$.score <- smooth_suitability(dat, suitability_col, w, order)
   
-
-  dat <- dat %>% filter(.data[[corePA_col]] %in% search_oecm_in )
-  
-  ## ---------- Global selection ----------
-  if (mode == "global") {
-    
-    stopifnot(length(coverage) == 1)
-    
-    target_area <- sum(dat$area) * coverage
-    
-    return(
-      dat %>%
-        arrange(desc(.data[[suitability_col]])) %>%
-        mutate(cum_area = cumsum(area)) %>%
-        slice(seq_len(which(cum_area >= target_area)[1])) %>%
-        dplyr::select(-cum_area)
-    )
+  pick <- function(d, cov) {
+    if (nrow(d) == 0) return(d)
+    target <- sum(d$area) * cov
+    d <- d %>% arrange(desc(.score)) %>% mutate(cum_area = cumsum(area))
+    d %>% slice(seq_len(which(cum_area >= target)[1])) %>% select(-cum_area)
   }
   
-  ## ---------- Class-specific selection ----------
-  stopifnot(!is.null(names(coverage)))
+  if (mode == "global") {
+    stopifnot(length(coverage) == 1)
+    return(pick(dat, coverage) %>% select(-.score))
+  }
   
-  map_dfr(names(coverage), function(cls) {
-    
-    dat_cls <- dat %>%
-      filter(.data[[lulc_col]] == cls) %>%
-      arrange(desc(.data[[suitability_col]]))
-    
-    if (nrow(dat_cls) == 0)
-      return(dat_cls)
-    
-    target_area <- sum(dat_cls$area) * coverage[[cls]]
-    
-    dat_cls %>%
-      mutate(cum_area = cumsum(area)) %>%
-      slice(seq_len(which(cum_area >= target_area)[1]))
-  }) %>%
-    dplyr::select( -cum_area)
+  stopifnot(!is.null(names(coverage)))
+  map_dfr(names(coverage), function(cls)
+    pick(filter(dat, .data[[lulc_col]] == cls), coverage[[cls]])) %>%
+    select(-.score)
 }
 
 
@@ -261,7 +249,7 @@ plot_pca_map<-function(pu,
 
   
   pu_pca<-rbind(other,oecm,no_oecm_pa,core_pa)
-  pu_pca<-pu_pca%>%select(id,lulc_name, sampled_es_reg_scaled,sampled_es_prov_scaled,sampled_es_cult_scaled,sampled_grand_mean_es_scaled, sampled_eco_cond_scaled, sampled_cost_es,connectivity_scaled,area,pca)
+  pu_pca<-pu_pca
   
   if(save_output == T){
     st_write(pu_pca,paste0("outputs/WP4/03_pca_landscape/PCA_PU_",target_site,"_",scen,".geojson"))
@@ -286,12 +274,17 @@ plot_pca_map<-function(pu,
                  "Other PA (IUCN III-VI)" = "#ADD8E6"),
       name = NULL
     )  +
+    geom_sf(
+      data = pu%>%filter(lulc_name == "built-up"),
+      aes(fill = lulc_name),
+      color = "grey", fill="grey"  )+
     
     new_scale_fill() +
-
     # stud area
     geom_sf(data = stud_area, fill = NA, color = "black") +
     theme_minimal()+
+    
+    theme(legend.position="bottom")+
     ggtitle(scen)
   
   list(

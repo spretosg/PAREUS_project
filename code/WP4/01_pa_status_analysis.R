@@ -10,7 +10,7 @@ library(dplyr)
 library(ggplot2)
 library(tidyr)
 source("code/WP4/wp4_functions_utils.R")
-target_site<-"FRA"
+target_site<-"SK021"
 
 ####---- User parameter ----####
 #Parameters to set, ev to develop in collaboration with stakeholders
@@ -18,8 +18,8 @@ core_PA<-c("Ia","II") #WDPA categories to define as strictly protected areas
 
 #the targets depends on the scenario, a global scenario defines a global protection target across all LULC, the lulc targets are used if lulc specific protection is aimed
 target_glob <- 0.1 #global target for core protection across all LULC types
-target_lulc <-c(forest = 0.1, water = 0.2, wetland = 0.2, agricultural = 0.05) #lulc specific protection target
-PU_size<-1200 #lin m2 lower number increase the resolution but increase also computation time down stream
+target_lulc <-c(forest = 0.1, water = 0.1, wetland = 0.1, agricultural = 0) #lulc specific protection target
+PU_size<-600 #lin m2 lower number increase the resolution but increase also computation time down stream
 
 ####---- Input and processing ----####
 # study area
@@ -30,7 +30,14 @@ lulc<-terra::rast(paste0("data/shared/",target_site,"_lulc.tif"))
 PA<-st_read(paste0("data/WP4/WDPA_",target_site,".gpkg"))
 
 ## spatial transformation
-target_crs<-25833
+if(target_site == "TRD"){
+  target_crs<-25833
+} else if(target_site == "FRA"){
+  target_crs <-2154
+}else{
+  target_crs <-5514
+}
+
 stud_area<-st_transform(stud_area,target_crs)
 lulc <- project(lulc, paste0("epsg:",target_crs))
 PA<-st_transform(PA,st_crs(target_crs))
@@ -110,15 +117,22 @@ st_write(grid, paste0("outputs/WP4/01_PA_analysis/",target_site,"_input_grid.jso
 
 ####---- Protection analysis ----####
 p<-ggplot() +
-     geom_sf(
-       data = grid%>%filter(n_pa>0),
-        aes(fill = n_pa),
-     color = "NA"  )+
+  geom_sf(
+    data = grid %>% filter(n_pa > 0),
+    aes(fill = n_pa),
+    color = NA
+  ) +
   scale_fill_gradient(
-    high = "#C50202",
     low = "#FFC2C2",
+    high = "#C50202",
+    breaks = seq(
+      min(grid$n_pa, na.rm = TRUE),
+      max(grid$n_pa, na.rm = TRUE),
+      by = 1
+    ),
+    labels = function(x) as.integer(x),
     space = "Lab",
-    na.value = "grey50",
+    na.value = "grey50"
   )+
   geom_sf(data = stud_area, fill = NA, color = "black") +
   theme_minimal()+
@@ -145,6 +159,10 @@ p<-ggplot() +
     na.value = NA
   )+
   geom_sf(data = stud_area, fill = NA, color = "black") +
+  geom_sf(
+    data = grid%>%filter(lulc_name == "built-up"),
+    aes(fill = lulc_name),
+    color = "grey", fill="grey"  )+
   theme_minimal()
 ggsave(paste0("outputs/WP4/01_PA_analysis/",target_site,"_IUCN.png"), plot = p, dpi = 300)
 
