@@ -9,7 +9,7 @@ library(terra)
 library(dplyr)
 library(ggplot2)
 source("code/WP4/wp4_functions_utils.R")
-target_site<-"TRD"
+target_site<-"SK021"
 
 
 ####---- Input and processing ----####
@@ -49,9 +49,9 @@ mean_prov
 mean_cult
 mean_reg
 
-writeRaster(mean_prov,paste0("data/WP4/prov_",target_site,".tif"))
-writeRaster(mean_reg,paste0("data/WP4/reg_",target_site,".tif"))
-writeRaster(mean_cult,paste0("data/WP4/cult_",target_site,".tif"))
+# writeRaster(mean_prov,paste0("data/WP4/prov_",target_site,".tif"))
+# writeRaster(mean_reg,paste0("data/WP4/reg_",target_site,".tif"))
+# writeRaster(mean_cult,paste0("data/WP4/cult_",target_site,".tif"))
 
 ## Ecosystem condition (cookbook nr.2)
 es_cond<-terra::rast(paste0("data/WP2/",target_site,"/int.tif"))
