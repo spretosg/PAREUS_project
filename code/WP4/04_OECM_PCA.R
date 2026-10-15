@@ -13,7 +13,7 @@ library(tidyverse)
 
 source("code/WP4/wp4_functions_utils.R")
 
-target_site<-"TRD"
+target_site<-"SK021"
 scenario<-"nature"# "nature" #"intermediate" "multifunctional"
 ####---- User parameter ----####
 #MCDA weighting 
@@ -62,8 +62,8 @@ pu$oecm_suit<-oecm_lin_w(pu$sampled_es_cult_scaled,pu$sampled_es_prov_scaled,
                          pu$sampled_es_reg_scaled,pu$connectivity_scaled,eco_c$w_cult,eco_c$w_prov,eco_c$w_reg,eco_c$w_connect)
 
 #human centric
-# pu$oecm_suit<-oecm_lin_w(pu$sampled_es_cult_scaled,pu$sampled_es_prov_scaled,
-#                          pu$sampled_es_reg_scaled,pu$connectivity_scaled,human_c$w_cult,human_c$w_prov,human_c$w_reg,human_c$w_connect)
+pu$oecm_suit<-oecm_lin_w(pu$sampled_es_cult_scaled,pu$sampled_es_prov_scaled,
+                         pu$sampled_es_reg_scaled,pu$connectivity_scaled,human_c$w_cult,human_c$w_prov,human_c$w_reg,human_c$w_connect)
 
 
 ggplot(pu %>% filter(!existing_corePA)) +
@@ -84,6 +84,137 @@ ggplot(pu %>% filter(!existing_corePA)) +
         legend.position = "top")
 
 
+### SK LCP connectivity
+#interpolate oecm suit if na
+library(RANN)
+pu <- fill_suit_na(pu, "oecm_suit", method = "neighbours")
+sum(pu$suitability_filled_imputed) 
+
+lcp <- lcp_connect(
+  pu,
+  sel            = pu$is_core_prot_agri,      # existing + new + upgrade cells
+  suit_col       = "oecm_suit_filled",               # your suitability column
+  exclude        = pu$lulc_name == "built-up",  # hard barrier
+  transform      = "linear",
+  max_resistance = 50,
+  topology       = "mst"
+)
+
+pu$is_corridor_agri <- pu$id %in% lcp$corridor_ids
+
+cols <- c(
+  "existing core pa" = "#00A300",
+  "new core PA" = "#bf8bff",
+  "proposed upgrade existing PA" = "#e5d0ff",
+  "not protected" = NA,
+  "other protected areas" = "#F1EE8D"
+)
+
+ggplot() +
+  geom_sf(data = pu[pu$is_corridor_agri, ], fill = "orange", colour = NA) +
+  geom_sf(data = pu, aes(fill = core_pa_agri), color = NA) +
+  scale_fill_manual(values = cols, name = NULL, na.translate = FALSE) +
+  # geom_sf(data = lcp$paths, colour = "red", linewidth = 0.6) +
+  geom_sf(data = lcp$nodes, size = 1.5) +
+  geom_sf(data = stud_area, fill = NA, color = "black") +
+  geom_sf(
+    data = pu%>%filter(lulc_name == "built-up"),
+    aes(fill = lulc_name),
+    color = "grey", fill="grey"  )+
+  #scale_fill_manual(values = cols, breaks = names(cols)[1:3], name = NULL) +
+  theme_minimal()
+
+
+
+#path statistics
+corridor_lulc_stats <- function(pu, flag_col, scenario) {
+  pu %>%
+    sf::st_drop_geometry() %>%
+    dplyr::filter(.data[[flag_col]] %in% TRUE) %>%
+    dplyr::group_by(lulc_name) %>%
+    dplyr::summarise(SQkm = sum(area_km2), n_cells = dplyr::n(), .groups = "drop") %>%
+    dplyr::mutate(pct = 100 * SQkm / sum(SQkm), scenario = scenario)
+}
+
+# adjust the labels if your naming is the other way round
+sc_levels <- c("No PA's in agricultural areas", "Agricultural areas as PA possible")
+
+stats <- dplyr::bind_rows(
+  corridor_lulc_stats(pu, "is_corridor_agri", sc_levels[1]),
+  corridor_lulc_stats(pu, "is_corridor_global",   sc_levels[2])
+)
+
+comparison <- stats %>%
+  dplyr::select(lulc_name, scenario, SQkm) %>%
+  tidyr::pivot_wider(names_from = scenario, values_from = SQkm, values_fill = 0)
+comparison <- dplyr::bind_rows(
+  comparison,
+  comparison %>% dplyr::summarise(dplyr::across(where(is.numeric), sum)) %>%
+    dplyr::mutate(lulc_name = "TOTAL")
+)
+comparison
+
+lulc_order <- stats %>%
+  dplyr::group_by(lulc_name) %>% dplyr::summarise(t = sum(SQkm)) %>%
+  dplyr::arrange(dplyr::desc(t)) %>% dplyr::pull(lulc_name)
+
+pies <- stats %>%
+  dplyr::mutate(lulc_name = factor(lulc_name, levels = lulc_order),
+                scenario  = factor(scenario,  levels = sc_levels)) %>%
+  dplyr::arrange(scenario, lulc_name) %>%
+  dplyr::group_by(scenario) %>%
+  dplyr::mutate(total = sum(SQkm),
+                frac  = SQkm / total,
+                end   = 2 * pi * cumsum(frac),
+                start = end - 2 * pi * frac,
+                mid   = (start + end) / 2) %>%
+  dplyr::ungroup()
+
+# pie area proportional to total corridor area; pies placed side by side
+gap <- 0.8
+sizes <- pies %>%
+  dplyr::distinct(scenario, total) %>%
+  dplyr::arrange(scenario) %>%
+  dplyr::mutate(r  = sqrt(total / max(total)),
+                x0 = cumsum(2 * r + gap) - r - gap)
+
+pies <- dplyr::left_join(pies, sizes[, c("scenario", "r", "x0")], by = "scenario")
+
+min_label_pct <- 1   # skip labels for slices smaller than this
+labs_df <- pies %>%
+  dplyr::filter(frac >= min_label_pct / 100) %>%
+  dplyr::mutate(lx  = x0 + 1.12 * r * sin(mid),
+                ly  = 1.12 * r * cos(mid),
+                lab = paste0(format(round(SQkm, 1), nsmall = 1), " km²"),
+                hj  = ifelse(sin(mid) >= 0, 0, 1))
+
+titles <- sizes %>%
+  dplyr::mutate(lab = sprintf("%s\n%.0f km² total", scenario, total),
+                ty  = -r - 0.3)
+
+# 3. Plot -------------------------------------------------------------------
+map_pie <- ggplot() +
+  ggforce::geom_arc_bar(
+    data = pies,
+    aes(x0 = x0, y0 = 0, r0 = 0, r = r, start = start, end = end,
+        fill = lulc_name, group = interaction(scenario, lulc_name)),
+    colour = "white", linewidth = 0.3
+  ) +
+  geom_text(data = labs_df, aes(lx, ly, label = lab, hjust = hj), size = 3.5) +
+  geom_text(data = titles, aes(x0, ty, label = lab), fontface = "bold", lineheight = 0.9) +
+  scale_fill_viridis_d(name = "LULC", drop = FALSE) +   # swap for your own LULC palette
+  coord_fixed(clip = "off") +
+  labs(subtitle = "Pie area proportional to total corridor area") +
+  theme_void(base_size = 14) +
+  theme(legend.position = "bottom",
+        plot.margin = margin(10, 40, 10, 40))
+
+map_pie
+
+## corridor growth where oecm suitability is best to meet a target
+
+
+### FR and NOR
 ####---- Select top-% OECM suitability based on scenario----####
 # oecm_nat_lulc<-select_oecm(pu=pu, 
 #                   mode= "class", 

@@ -1,79 +1,7 @@
 ## calculate core protection gap
 
 
-protection_gap <- function(x,
-                           mode = c("class", "global"),
-                           target,
-                           lulc_col = "lulc_name",
-                           corePA_col = "core_PA",
-                           lockout = NULL,
-                           area_col = NULL) {
-  
-  mode <- match.arg(mode)
-  
-  dat <- x
-  
-  # Remove lock-out LULC classes
-  if (!is.null(lockout)) {
-    dat <- dat %>%
-      filter(!(.data[[lulc_col]] %in% lockout))
-  }
-  
-  # area in m²
-  if (is.null(area_col)) {
-    dat$area <- as.numeric(st_area(dat))
-  } else {
-    dat$area <- dat[[area_col]]
-  }
-  
 
-  
-  if (mode == "class") {
-    
-    # Summary by LULC
-    gap <- dat %>%
-      st_drop_geometry() %>%
-      group_by(.data[[lulc_col]]) %>%
-      summarise(
-        total_area = sum(area),
-        protected_area = sum(area[.data[[corePA_col]]]),
-        .groups = "drop"
-      )
-    stopifnot(!is.null(names(target)))
-    
-    gap <- gap %>%
-      mutate(
-        target_fraction = target[as.character(.data[[lulc_col]])],
-        target_area = target_fraction * total_area
-      )
-    
-  } else {
-    gap <- dat %>%
-      st_drop_geometry() %>%
-      summarise(
-        lulc_name = paste0("global_",target,"_prot"),
-        total_area = sum(area),
-        protected_area = sum(area[.data[[corePA_col]]])
-      )
-    stopifnot(length(target) == 1)
-    #excluding lockout
-    total_area <- sum(gap$total_area)
-    
-    gap <- gap %>%
-      mutate(
-        target_fraction = target,
-        target_area = total_area * target
-      )
-  }
-  
-  gap %>%
-    mutate(
-      gap_area = pmax(target_area - protected_area, 0),
-      surplus_area = pmax(protected_area - target_area, 0),
-      protected_fraction = protected_area / total_area,
-      gap_fraction = gap_area / total_area
-    )
-}
 
 
 # pa_optim <- function(
@@ -200,48 +128,10 @@ classify_pa <- function(pu, new_ids) {
   )
 }
 
-min_max_normalize <- function(r) {
-  # Normalize each layer individually
-  norm_r <- lapp(r, function(x) {
-    r_min <- min(x, na.rm = TRUE)
-    r_max <- max(x, na.rm = TRUE)
-    (x - r_min) / (r_max - r_min)
-  })
-  return(norm_r)
-  
-}
 
 
-zero_one_scale <- function(sf_df, cols = NULL, na.rm = TRUE) {
-  
-  # If no columns specified: use all numeric columns
-  if (is.null(cols)) {
-    cols <- sf_df %>%
-      st_drop_geometry() %>%
-      select(where(is.numeric)) %>%
-      names()
-  }
-  
-  sf_df %>%
-    mutate(
-      across(
-        all_of(cols),
-        .fns = function(x) {
-          
-          min_x <- min(x, na.rm = na.rm)
-          max_x <- max(x, na.rm = na.rm)
-          rng   <- max_x - min_x
-          
-          if (rng == 0) {
-            return(rep(0, length(x)))
-          } else {
-            return((x - min_x) / rng)
-          }
-        },
-        .names = "{.col}_scaled"
-      )
-    )
-}
+
+
 
 oecm_lin_w<-function(cult_es,prov_es,ec,conn,w_cult,w_prov,w_ec,w_connect){
   weighted_sum <- cult_es * w_cult +
@@ -372,4 +262,195 @@ plot_pca_map<-function(pu,
     pu = pu_pca
   )
   
+}
+
+### LCP on OECM suitability
+lcp_connect <- function(
+    pu,                         # sf: ALL planning units, with a suitability column
+    sel,                        # logical vector (length nrow(pu)): selected cells to connect
+    suit_col,                   # suitability column (high = easy to move through)
+    topology         = c("mst", "nearest", "all"),
+    k                = 1,       # neighbours per patch if topology = "nearest"
+    transform        = c("linear", "inverse", "exp"),
+    max_resistance   = 50,      # resistance of the least suitable cell (best cell = 1)
+    contiguity       = c("queen", "rook"),
+    exclude          = NULL,    # logical vector: cells that cannot be crossed (e.g. built-up)
+    patch_resistance = NULL,    # e.g. 1 to make paths prefer running through selected cells
+    min_patch_km2    = 0,
+    id_col           = "id"
+) {
+  topology   <- match.arg(topology)
+  transform  <- match.arg(transform)
+  contiguity <- match.arg(contiguity)
+  n <- nrow(pu)
+  
+  stopifnot(
+    inherits(pu, "sf"), !sf::st_is_longlat(pu),
+    is.logical(sel), length(sel) == n, !anyNA(sel), sum(sel) > 1,
+    suit_col %in% names(pu), is.numeric(pu[[suit_col]]), 
+    is.numeric(max_resistance), max_resistance > 1
+  )
+  if (is.null(exclude)) exclude <- rep(FALSE, n)
+  stopifnot(is.logical(exclude), length(exclude) == n, !anyNA(exclude))
+  exclude <- exclude & !sel          # selected cells are always traversable
+  
+  # 1. Suitability -> resistance, rescaled over ALL pu so it does not depend on the selection
+  s <- pu[[suit_col]]
+  if (anyNA(s[!exclude])) {
+    stop(sum(is.na(s[!exclude])), " non-excluded cells have NA in '", suit_col,
+         "'. Fill them (fill_suit_na) or pass them in `exclude`.")
+  }
+  s[is.na(s)] <- median(s, na.rm = TRUE)
+  if (diff(range(s)) == 0) stop("suit_col is constant")
+  s01 <- (s - min(s)) / (max(s) - min(s))
+  res <- switch(
+    transform,
+    linear  = 1 + (1 - s01) * (max_resistance - 1),
+    inverse = 1 / (s01 * (1 - 1 / max_resistance) + 1 / max_resistance),
+    exp     = exp((1 - s01) * log(max_resistance))
+  )
+  if (!is.null(patch_resistance)) res[sel] <- patch_resistance
+  
+  # 2. Cell graph: nodes = pu rows, edges = neighbours, weight = distance x mean resistance
+  pts      <- sf::st_point_on_surface(sf::st_geometry(pu))
+  xy       <- sf::st_coordinates(pts)
+  area_km2 <- as.numeric(sf::st_area(pu)) / 1e6
+  
+  nb <- if (contiguity == "queen") sf::st_touches(pu) else
+    sf::st_relate(pu, pu, pattern = "F***1****")
+  
+  from <- rep(seq_along(nb), lengths(nb))
+  to   <- unlist(nb)
+  ok   <- from < to & !exclude[from] & !exclude[to]
+  from <- from[ok]; to <- to[ok]
+  
+  d <- sqrt(rowSums((xy[from, , drop = FALSE] - xy[to, , drop = FALSE])^2)) / 1000  # km
+  w <- d * (res[from] + res[to]) / 2
+  
+  g <- igraph::make_undirected_graph(edges = c(rbind(from, to)), n = n)
+  igraph::E(g)$w <- w
+  w_all <- igraph::E(g)$w
+  
+  # 3. Patches = connected components of the selected cells
+  both  <- sel[from] & sel[to]
+  gs    <- igraph::make_undirected_graph(edges = c(rbind(from[both], to[both])), n = n)
+  comp  <- igraph::components(gs)$membership
+  patch_of <- ifelse(sel, comp, NA_integer_)
+  pid   <- sort(unique(patch_of[sel]))
+  
+  patch_area <- vapply(pid, function(p) sum(area_km2[which(patch_of == p)]), numeric(1))
+  # Representative cell: the selected cell closest to the area-weighted patch centre,
+  # so it always lies inside the patch (even for concave patches)
+  start <- vapply(pid, function(p) {
+    idx <- which(patch_of == p)
+    a   <- area_km2[idx]
+    ctr <- c(sum(xy[idx, 1] * a), sum(xy[idx, 2] * a)) / sum(a)
+    idx[which.min((xy[idx, 1] - ctr[1])^2 + (xy[idx, 2] - ctr[2])^2)]
+  }, integer(1))
+  
+  keep  <- patch_area >= min_patch_km2
+  pid <- pid[keep]; patch_area <- patch_area[keep]; start <- start[keep]
+  if (length(start) < 2) stop("Need at least two patches to connect")
+  
+  # 4. Least-cost distances between patch representatives
+  D <- igraph::distances(g, v = start, to = start, weights = w_all)
+  D[!is.finite(D)] <- NA
+  
+  edges <- switch(
+    topology,
+    all = {
+      ij <- which(upper.tri(D), arr.ind = TRUE)
+      ij[!is.na(D[ij]), , drop = FALSE]
+    },
+    nearest = {
+      do.call(rbind, lapply(seq_len(nrow(D)), function(i) {
+        di <- D[i, ]; di[i] <- NA
+        j  <- order(di)[seq_len(min(k, sum(!is.na(di))))]
+        if (length(j)) cbind(i, j)
+      }))
+    },
+    mst = {
+      W <- D; W[is.na(W)] <- 0; diag(W) <- 0          # 0 = no edge
+      g2 <- igraph::graph_from_adjacency_matrix(W, mode = "max", weighted = TRUE, diag = FALSE)
+      igraph::as_edgelist(igraph::mst(g2), names = FALSE)
+    }
+  )
+  if (is.null(edges) || !nrow(edges)) stop("No connectable patch pairs (check `exclude`)")
+  edges <- unique(t(apply(edges, 1, sort)))
+  if (!is.matrix(edges)) edges <- matrix(edges, ncol = 2)
+  
+  # 5. Paths as cell sequences -> sf lines
+  paths <- lapply(seq_len(nrow(edges)), function(e) {
+    as.integer(igraph::shortest_paths(g, from = start[edges[e, 1]], to = start[edges[e, 2]],
+                                      weights = w_all, output = "vpath")$vpath[[1]])
+  })
+  
+  geom <- sf::st_sfc(lapply(paths, function(ids) sf::st_linestring(xy[ids, , drop = FALSE])),
+                     crs = sf::st_crs(pu))
+  lines <- sf::st_sf(
+    from    = pid[edges[, 1]],
+    to      = pid[edges[, 2]],
+    cost    = D[edges],
+    n_cells = lengths(paths),
+    geometry = geom
+  )
+  lines$length_km <- as.numeric(sf::st_length(lines)) / 1000
+  
+  # Non-selected cells the paths run through (the corridor itself)
+  used     <- unique(unlist(paths))
+  corridor <- used[!sel[used]]
+  corridor_ids <- if (id_col %in% names(pu)) pu[[id_col]][corridor] else corridor
+  
+  nodes <- sf::st_sf(patch_id = pid, area_km2 = patch_area, geometry = pts[start])
+  
+  list(paths = lines, nodes = nodes, corridor_ids = corridor_ids,
+       cost_matrix = D, resistance = res)
+}
+
+
+### helper function to impute na in oecm suitability
+fill_suit_na <- function(pu, suit_col,
+                         method   = c("neighbours", "idw"),
+                         k        = 8,      # idw: number of nearest valid cells
+                         power    = 2,      # idw: distance exponent
+                         max_iter = 100,    # neighbours: max passes
+                         new_col  = paste0(suit_col, "_filled")) {
+  method <- match.arg(method)
+  s  <- pu[[suit_col]]
+  na <- is.na(s)
+  
+  if (any(na)) {
+    xy <- sf::st_coordinates(sf::st_point_on_surface(sf::st_geometry(pu)))
+    
+    if (method == "idw") {
+      # inverse-distance weighting from the k nearest valid cells (needs RANN)
+      nn   <- RANN::nn2(xy[!na, , drop = FALSE], xy[na, , drop = FALSE],
+                        k = min(k, sum(!na)))
+      wts  <- 1 / pmax(nn$nn.dists, 1)^power                # distances in metres
+      vals <- matrix(s[!na][nn$nn.idx], nrow = nrow(nn$nn.idx))
+      s[na] <- rowSums(wts * vals) / rowSums(wts)
+      
+    } else {
+      # iterative neighbour mean: each pass fills cells that touch a valid cell
+      nb <- sf::st_touches(pu)
+      for (it in seq_len(max_iter)) {
+        miss <- which(is.na(s))
+        if (!length(miss)) break
+        new <- vapply(miss, function(i) {
+          v <- s[nb[[i]]]
+          if (all(is.na(v))) NA_real_ else mean(v, na.rm = TRUE)
+        }, numeric(1))
+        s[miss] <- new                                       # simultaneous update
+      }
+      if (anyNA(s)) {
+        warning(sum(is.na(s)), " cells still NA after ", max_iter,
+                " passes (isolated from valid cells); filled with the median")
+        s[is.na(s)] <- median(s, na.rm = TRUE)
+      }
+    }
+  }
+  
+  pu[[new_col]]       <- s
+  pu[[paste0(new_col, "_imputed")]] <- na
+  pu
 }
