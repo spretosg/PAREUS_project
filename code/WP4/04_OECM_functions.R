@@ -12,6 +12,125 @@ oecm_lin_w<-function(cult_es,prov_es,ec,conn,w_cult,w_prov,w_ec,w_connect){
   
 }
 
+plot_area_pies <- function(
+    stats,
+    slice_col,                       # column defining the slices (e.g. "pca" or "lulc_name")
+    value_col       = "AREA_SQKM",
+    scenario_col    = "scenario",
+    facet_col       = NULL,          # optional: one row of pies per level (e.g. "lulc_name")
+    keep_slices     = NULL,          # optional: show only these slice values
+    slice_levels    = NULL,          # slice order (default: largest first)
+    scenario_levels = NULL,
+    fill_values     = NULL,          # named colours; default viridis
+    label           = c("km2", "pct", "both"),
+    min_label_pct   = 1,             # no label for slices below this share
+    digits          = 1,
+    unit            = "km²",
+    legend_title    = NULL,
+    subtitle        = "Pie area proportional to total area",
+    base_size       = 14,
+    pad             = 2.2            # horizontal room for labels
+) {
+  label <- match.arg(label)
+  d <- as.data.frame(stats)
+  d$.scn   <- d[[scenario_col]]
+  d$.slice <- d[[slice_col]]
+  d$.val   <- d[[value_col]]
+  d$.facet <- if (is.null(facet_col)) "" else d[[facet_col]]
+  
+  if (!is.null(keep_slices)) d <- d[d$.slice %in% keep_slices, ]
+  d <- d[!is.na(d$.slice) & !is.na(d$.val) & d$.val > 0, ]
+  if (!nrow(d)) stop("Nothing to plot after filtering")
+  
+  d <- d |>
+    dplyr::group_by(.scn, .facet, .slice) |>
+    dplyr::summarise(.val = sum(.val), .groups = "drop")
+  
+  if (is.null(slice_levels)) {
+    slice_levels <- d |>
+      dplyr::group_by(.slice) |>
+      dplyr::summarise(t = sum(.val), .groups = "drop") |>
+      dplyr::arrange(dplyr::desc(t)) |>
+      dplyr::pull(.slice) |> as.character()
+  }
+  d$.slice <- factor(d$.slice, levels = slice_levels)
+  d <- d[!is.na(d$.slice), ]
+  d$.scn <- factor(d$.scn, levels = if (is.null(scenario_levels)) unique(d$.scn) else scenario_levels)
+  
+  # angles per pie
+  d <- d |>
+    dplyr::arrange(.scn, .facet, .slice) |>
+    dplyr::group_by(.scn, .facet) |>
+    dplyr::mutate(total = sum(.val),
+                  frac  = .val / total,
+                  end   = 2 * pi * cumsum(frac),
+                  start = end - 2 * pi * frac,
+                  mid   = (start + end) / 2) |>
+    dplyr::ungroup()
+  d$end <- ifelse(d$frac > 0.9999, d$start + 2 * pi - 1e-4, d$end)   # single-slice pie
+  d$r   <- sqrt(d$total / max(d$total))                              # same scale in all panels
+  
+  # strip labels: the total goes under the facet name
+  fmt_total <- function(x) sprintf("%s %s total", format(round(x, 0), big.mark = ",", trim = TRUE), unit)
+  
+  if (is.null(facet_col)) {
+    # one strip per scenario: "<scenario>\n<total>"
+    lab <- paste0(d$.scn, "\n", fmt_total(d$total))
+    d$.col_lab <- factor(lab, levels = unique(lab[order(d$.scn)]))
+  } else {
+    # columns = scenarios; rows = facet values with their total (one number if the
+    # scenarios share it, otherwise "a | b | ...")
+    d$.col_lab <- d$.scn
+    row_tot <- d |>
+      dplyr::distinct(.scn, .facet, total) |>
+      dplyr::arrange(.facet, .scn) |>
+      dplyr::group_by(.facet) |>
+      dplyr::summarise(
+        row_total = {
+          u <- unique(round(total, 6))
+          if (length(u) == 1) fmt_total(u) else paste(fmt_total(total), collapse = " | ")
+        },
+        .groups = "drop")
+    d   <- dplyr::left_join(d, row_tot, by = ".facet")
+    lab <- paste0(d$.facet, "\n", d$row_total)
+    d$.row_lab <- factor(lab, levels = unique(lab[order(d$.facet)]))
+  }
+  
+  # slice labels
+  lab_df <- d[d$frac >= min_label_pct / 100, ]
+  num <- format(round(lab_df$.val, digits), nsmall = digits, trim = TRUE)
+  pct <- sprintf("%.0f%%", 100 * lab_df$frac)
+  lab_df$lab <- switch(label,
+                       km2  = paste0(num, " ", unit),
+                       pct  = pct,
+                       both = paste0(num, " ", unit, "\n(", pct, ")"))
+  lab_df$lx <- 1.15 * lab_df$r * sin(lab_df$mid)
+  lab_df$ly <- 1.15 * lab_df$r * cos(lab_df$mid)
+  lab_df$hj <- ifelse(sin(lab_df$mid) >= 0, 0, 1)
+  
+  p <- ggplot2::ggplot() +
+    ggforce::geom_arc_bar(
+      data = d,
+      ggplot2::aes(x0 = 0, y0 = 0, r0 = 0, r = r, start = start, end = end, fill = .slice),
+      colour = "white", linewidth = 0.3) +
+    ggplot2::geom_text(data = lab_df, ggplot2::aes(lx, ly, label = lab, hjust = hj),
+                       size = 3.5, lineheight = 0.9) +
+    (if (is.null(fill_values)) ggplot2::scale_fill_viridis_d(drop = FALSE)
+     else ggplot2::scale_fill_manual(values = fill_values, drop = FALSE)) +
+    ggplot2::coord_fixed(xlim = c(-pad, pad), ylim = c(-1.4, 1.4), clip = "off") +
+    ggplot2::labs(fill = legend_title, subtitle = subtitle) +
+    ggplot2::theme_void(base_size = base_size) +
+    ggplot2::theme(legend.position = "bottom",
+                   strip.text   = ggplot2::element_text(face = "bold", lineheight = 0.95),
+                   strip.text.y = ggplot2::element_text(face = "bold", lineheight = 0.95, angle = 0),
+                   plot.margin  = ggplot2::margin(10, 20, 10, 20))
+  
+  if (is.null(facet_col)) {
+    p + ggplot2::facet_wrap(ggplot2::vars(.col_lab))
+  } else {
+    p + ggplot2::facet_grid(rows = ggplot2::vars(.row_lab), cols = ggplot2::vars(.col_lab))
+  }
+}
 
 smooth_suitability <- function(dat, suitability_col, w = 0.5, order = 1) {
   nb <- st_touches(dat)                      # neighbours among eligible PUs
