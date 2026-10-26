@@ -229,7 +229,7 @@ lcp_connect <- function(
     sel,                        # logical vector (length nrow(pu)): selected cells to connect
     suit_col,                   # suitability column (high = easy to move through)
     topology         = c("mst", "nearest", "all"),
-    k                = 1,       # neighbours per patch if topology = "nearest"
+    k                = 3,       # neighbours per patch if topology = "nearest"
     transform        = c("linear", "inverse", "exp"),
     max_resistance   = 50,      # resistance of the least suitable cell (best cell = 1)
     contiguity       = c("queen", "rook"),
@@ -344,6 +344,10 @@ lcp_connect <- function(
                                       weights = w_all, output = "vpath")$vpath[[1]])
   })
   
+  # NEW: PU ids crossed by each path (same order as the rows of `lines`)
+  path_cells <- lapply(paths, function(ids)
+    if (id_col %in% names(pu)) pu[[id_col]][ids] else ids)
+  
   geom <- sf::st_sfc(lapply(paths, function(ids) sf::st_linestring(xy[ids, , drop = FALSE])),
                      crs = sf::st_crs(pu))
   lines <- sf::st_sf(
@@ -363,86 +367,152 @@ lcp_connect <- function(
   nodes <- sf::st_sf(patch_id = pid, area_km2 = patch_area, geometry = pts[start])
   
   list(paths = lines, nodes = nodes, corridor_ids = corridor_ids,
-       cost_matrix = D, resistance = res)
+       cost_matrix = D, resistance = res,
+       path_cells = path_cells)
 }
 
-plot_pca_map<-function(pu,
-                       corePA_col = "core_pa_lulc",
-                       oecm_df,
-                       stud_area,
-                       scen,
-                       save_output = F
-){
-  dat <-pu
-  oecm<-oecm_df
-  core_pa <- dat %>% filter(!.data[[corePA_col]] %in% c("not protected","other protected areas"))%>%mutate(pca = .data[[corePA_col]])
+# ---- 1. k-nearest least-cost paths -------------------------------------------
+# Core "areas" = contiguous groups of selected PUs. Each area is linked to its
+# k nearest areas (Euclidean); links are deduplicated (A-B == B-A).
+# Needs: sf, igraph
+lcp_connect_knn <- function(pu, sel, suit_col, exclude = NULL,
+                            transform = "linear", max_resistance = 50,
+                            k = 3, ...) {
+  n <- nrow(pu)
+  if (is.null(exclude)) exclude <- rep(FALSE, n)
+  exclude <- exclude & !sel                              # never block core cells
   
-  other_pa<-dat %>% filter(.data[[corePA_col]]=="other protected areas")%>%mutate(pca = "Other PA (IUCN III-VI)")
+  # resistance from suitability (1 = best, max_resistance = worst)
+  s <- pmin(pmax(pu[[suit_col]], 0), 1)
+  res <- switch(transform,
+                linear = 1 + (1 - s) * (max_resistance - 1),
+                stop("transform '", transform, "' not implemented here"))
+  res[is.na(res)] <- max_resistance
   
-  # oecm$pca <- ifelse(oecm$n_pa > 0, "Other PA (IUCN III-VI) high suitability for OECM", "High OECM suitability not protected - potential OECM")
-  oecm$pca <- ifelse(
-    oecm[[corePA_col]] == "other protected areas",
-    "Other PA (IUCN III-VI) high suitability for OECM",
-    "High OECM suitability not protected - potential OECM"
-  )
+  # cell graph (queen adjacency, edge cost = mean resistance of both cells)
+  nb <- sf::st_touches(pu)
+  from <- rep(seq_len(n), lengths(nb)); to <- unlist(nb)
+  ok <- !exclude[from] & !exclude[to] & from < to
+  from <- from[ok]; to <- to[ok]
+  ctr  <- sf::st_coordinates(sf::st_centroid(sf::st_geometry(pu)))
+  dist <- sqrt((ctr[from, 1] - ctr[to, 1])^2 + (ctr[from, 2] - ctr[to, 2])^2)
+  w    <- (res[from] + res[to]) / 2 * dist
   
-  ## other pa, remove ids from OECM
-  no_oecm_pa <- other_pa[!other_pa$id %in% oecm$id, ]
+  # core areas = connected components of selected cells
+  sel_idx <- which(sel)
+  g_core  <- igraph::graph_from_edgelist(cbind(from, to), directed = FALSE)
+  g_core  <- igraph::add_vertices(g_core, max(0, n - igraph::vcount(g_core)))
+  comp    <- igraph::components(igraph::induced_subgraph(g_core, sel_idx))$membership
+  area_id <- setNames(comp, sel_idx)
+  n_areas <- max(comp)
+  if (n_areas < 2) stop("fewer than two core areas")
   
-  other<-dat %>% filter(.data[[corePA_col]] == "not protected")%>%mutate(pca = "not protected")
-  #also here remove OECMs
-  other <- other[!other$id %in% oecm$id, ]
+  # k nearest areas by polygon distance
+  area_geom <- do.call(c, lapply(seq_len(n_areas), function(a)
+    sf::st_union(sf::st_geometry(pu)[sel_idx[comp == a]])))
+  D <- sf::st_distance(area_geom); diag(D) <- Inf; D <- unclass(D)
+  kk <- min(k, n_areas - 1)
+  pairs <- do.call(rbind, lapply(seq_len(n_areas), function(a)
+    cbind(a, order(D[a, ])[seq_len(kk)])))
+  pairs <- unique(t(apply(pairs, 1, sort)))              # undirected, dedup
   
+  # one virtual node per area, zero-cost link to its cells
+  v_nodes <- n + seq_len(n_areas)
+  e_from  <- c(from, v_nodes[comp])
+  e_to    <- c(to, sel_idx)
+  e_w     <- c(w, rep(1e-9, length(sel_idx)))
+  g <- igraph::graph_from_edgelist(cbind(e_from, e_to), directed = FALSE)
+  g <- igraph::add_vertices(g, max(0, n + n_areas - igraph::vcount(g)))
+  igraph::E(g)$weight <- e_w
   
-  pu_pca<-rbind(other,oecm,no_oecm_pa,core_pa)
-  pu_pca<-pu_pca
+  cell_len_km <- median(dist) / 1000                     # assumes CRS in metres
+  paths <- lapply(seq_len(nrow(pairs)), function(i) {
+    sp <- igraph::shortest_paths(g, v_nodes[pairs[i, 1]], v_nodes[pairs[i, 2]],
+                                 weights = igraph::E(g)$weight, output = "vpath")
+    cells <- as.integer(sp$vpath[[1]]); cells <- cells[cells <= n]
+    list(from = pairs[i, 1], to = pairs[i, 2], cells = cells,
+         length_km = length(cells) * cell_len_km)
+  })
+  paths <- paths[lengths(lapply(paths, `[[`, "cells")) > 0]
   
+  list(corridor_ids = pu$id[unique(unlist(lapply(paths, `[[`, "cells")))],
+       paths = data.frame(from = vapply(paths, `[[`, 1, "from"),
+                          to   = vapply(paths, `[[`, 1, "to"),
+                          length_km = vapply(paths, `[[`, 1, "length_km")),
+       path_cells = lapply(paths, function(p) pu$id[p$cells]))   # PU ids per path
+}
 
+# ---- 2. Weight scenarios ------------------------------------------------------
+# Each weight in turn is fixed to low/medium/high; the other three get random
+# values (flat Dirichlet) summing to 1 - fixed value.
+make_weight_scenarios <- function(levels = c(low = 0.1, medium = 0.5, high = 0.8),
+                                  n_rep = 5, seed = 1) {
+  set.seed(seed)
+  comps <- c("w_cult", "w_prov", "w_reg", "w_connect")
+  out <- list()
+  for (focus in comps) for (lv in names(levels)) for (r in seq_len(n_rep)) {
+    others <- setdiff(comps, focus)
+    g <- rgamma(3, 1); rest <- (1 - levels[[lv]]) * g / sum(g)
+    w <- setNames(numeric(4), comps); w[focus] <- levels[[lv]]; w[others] <- rest
+    out[[length(out) + 1]] <- data.frame(
+      tag = sprintf("%s_%s_r%02d", sub("w_", "", focus), lv, r),
+      focus = focus, level = lv, rep = r, t(w))
+  }
+  do.call(rbind, out)
+}
+
+# ---- 3. Run all scenarios and count paths per cell ---------------------------
+run_pca_corridors_grid <- function(site, scenario = c("agri", "global"),
+                                   levels = c(low = 0.1, medium = 0.5, high = 0.8),
+                                   n_rep = 5, seed = 1, k_nearest = 3,
+                                   optim_dir = "outputs/WP4/02_optim",
+                                   shared_dir = "data/shared",
+                                   out_dir = "outputs/WP4/03_pca_landscape",
+                                   write_maps = FALSE, ...) {
+  scenario  <- match.arg(scenario)
+  pu        <- sf::st_read(file.path(optim_dir, sprintf("PA_optim_grid_%s_%s.geojson", site, scenario)),
+                           quiet = TRUE)
+  stud_area <- sf::read_sf(file.path(shared_dir, paste0(site, ".gpkg")))
+  grid      <- make_weight_scenarios(levels, n_rep, seed)
+  wcols     <- c("w_cult", "w_prov", "w_reg", "w_connect")
   
-  stats<-pu_pca%>%group_by(pca,lulc_name)%>%summarise(area = sum(area))%>%st_drop_geometry()%>%mutate(scenario = scen)
+  res <- lapply(seq_len(nrow(grid)), function(i) {
+    message(sprintf("[%d/%d] %s", i, nrow(grid), grid$tag[i]))
+    run_pca_corridors(site, scenario, weights = as.list(grid[i, wcols]),
+                      pu = pu, stud_area = stud_area, tag = grid$tag[i],
+                      k_nearest = k_nearest, optim_dir = optim_dir,
+                      shared_dir = shared_dir, out_dir = out_dir,
+                      write = write_maps, ...)
+  })
+  names(res) <- grid$tag
   
-  total<-dat%>%group_by(lulc_name)%>%summarise(area = sum(area))%>%st_drop_geometry()%>%mutate(scenario = scen)
+  # N paths crossing each cell, over all scenarios and all k-nearest paths
+  all_ids <- unlist(lapply(res, function(r) r$lcp$path_cells), recursive = FALSE)
+  cnt <- table(unlist(lapply(all_ids, unique)))          # one count per path
+  pu$n_paths     <- 0L
+  pu$n_paths[match(as.integer(names(cnt)), pu$id)] <- as.integer(cnt)
+  pu$n_scenarios <- 0L                                   # in how many scenarios is it a corridor
+  sc <- table(unlist(lapply(res, function(r) r$lcp$corridor_ids)))
+  pu$n_scenarios[match(as.integer(names(sc)), pu$id)] <- as.integer(sc)
   
-  ############
-  p<-ggplot() +
-    # Layer 0: other pa
-    geom_sf(data = pu_pca%>%filter(pca != "not protected"),
-            aes(fill = pca),
-            color = NA) +
-    scale_fill_manual(
-      values = c(    "existing core pa" = "#00A300",
-                     "new core PA" = "#bf8bff",
-                     "proposed upgrade existing PA" = "#e5d0ff",
-                     "Other PA (IUCN III-VI) high suitability for OECM" = "#44a6c6",
-                     "High OECM suitability not protected - potential OECM" = "#194553",
-                     "Other PA (IUCN III-VI)" = "#ADD8E6"),
-      name = NULL
-    )  +
-    geom_sf(
-      data = pu%>%filter(lulc_name == "built-up"),
-      aes(fill = lulc_name),
-      color = "grey", fill="grey"  )+
-    
-    new_scale_fill() +
-    # stud area
-    geom_sf(data = stud_area, fill = NA, color = "black") +
-    theme_minimal()+
-    
-    theme(legend.position="bottom")+
-    ggtitle(scen)
+  map <- ggplot2::ggplot() +
+    ggplot2::geom_sf(data = pu[pu$n_paths > 0, ], ggplot2::aes(fill = n_paths), colour = NA) +
+    ggplot2::geom_sf(data = stud_area, fill = NA, colour = "black") +
+    ggplot2::scale_fill_viridis_c(name = "N paths", option = "magma", direction = -1) +
+    ggplot2::labs(title = sprintf("Paths crossing each cell: %s (%d scenarios, k = %d)",
+                                  scenario, nrow(grid), k_nearest)) +
+    ggplot2::theme_minimal()
   
-  if(save_output == T){
-    st_write(pu_pca,paste0("outputs/WP4/03_pca_landscape/PCA_PU_",stud_site,"_",scen,".geojson"))
-    ggsave(paste0("outputs/WP4/03_pca_landscape/PCA_PU_",stud_site,"_",scen,".png"),p)
+  if (write_maps || TRUE) {
+    dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+    ggplot2::ggsave(file.path(out_dir, sprintf("%s_PCA_%s_npaths.png", site, scenario)),
+                    map, width = 14, height = 12, dpi = 300)
+    sf::st_write(pu[, c("id", "n_paths", "n_scenarios")],
+                 file.path(out_dir, sprintf("%s_PCA_%s_npaths.geojson", site, scenario)),
+                 delete_dsn = TRUE, quiet = TRUE)
   }
   
-  list(
-    plot = p,
-    stats = stats,
-    total_area = total,
-    pu = pu_pca
-  )
-  
+  list(results = res, scenarios = grid, pu = pu, map = map)
 }
 
 
@@ -557,10 +627,15 @@ run_pca_corridors <- function(
   
   # 4. Least-cost corridors between the optimised core PAs
   sel <- pu[[class_col]] %in% core_classes
-  lcp <- lcp_connect(pu, sel = sel, suit_col = "oecm_suit_filled",
-                     exclude = pu$lulc_name %in% barrier_lulc,
-                     transform = transform, max_resistance = max_resistance,
-                     topology = topology, ...)
+  # lcp <- lcp_connect(pu, sel = sel, suit_col = "oecm_suit_filled",
+  #                    exclude = pu$lulc_name %in% barrier_lulc,
+  #                    transform = transform, max_resistance = max_resistance,
+  #                    topology = topology, ...)
+  
+ lcp<- lcp_connect_knn(pu, sel = sel, suit_col = "oecm_suit_filled",
+                  exclude = pu$lulc_name %in% barrier_lulc,
+                  transform = transform, max_resistance = max_resistance,
+                  k = 3)
   
   corridor_col <- paste0("is_corridor_", scenario)
   pu[[corridor_col]] <- pu$id %in% lcp$corridor_ids

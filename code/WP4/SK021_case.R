@@ -116,10 +116,24 @@ source("code/WP4/04_OECM_functions.R")
 scenario<-"nature"# "nature" #"intermediate" "multifunctional"
 
 # PUs containing the optimized core PA
-#pu_agri<-st_read(paste0("outputs/WP4/02_optim/PA_optim_grid_",stud_site,"_agri.geojson"))
+pu_agri<-st_read(paste0("outputs/WP4/02_optim/PA_optim_grid_",stud_site,"_agri.geojson"))
 #pu_glob<-st_read(paste0("outputs/WP4/02_optim/PA_optim_grid_",stud_site,"_global.geojson"))
-agri <- run_pca_corridors("SK021", "agri")
-glob <- run_pca_corridors("SK021", "global")
+#agri <- run_pca_corridors("SK021", "agri")
+agri<-run_pca_corridors_grid("SK021", scenario = "agri",
+                                         levels = c(low = 0.1, medium = 0.5, high = 0.8),
+                                         n_rep = 3, seed = 1, k_nearest = 3,
+                                         optim_dir = "outputs/WP4/02_optim",
+                                         shared_dir = "data/shared",
+                                         out_dir = "outputs/WP4/03_pca_landscape",
+                                         write_maps = FALSE)
+
+glob<-run_pca_corridors_grid("SK021", scenario = "global",
+                             levels = c(low = 0.1, medium = 0.5, high = 0.8),
+                             n_rep = 3, seed = 1, k_nearest = 3,
+                             optim_dir = "outputs/WP4/02_optim",
+                             shared_dir = "data/shared",
+                             out_dir = "outputs/WP4/03_pca_landscape",
+                             write_maps = FALSE)
 
 plot(glob$map)
 
